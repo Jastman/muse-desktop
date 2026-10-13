@@ -1,13 +1,25 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
---><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
-  <channel>
-    <title>Muse Desktop — Unofficial (x64)</title>
-    <link>https://github.com/robzilla1738/muse-desktop</link>
-    <description>Signed releases of the unofficial Muse Code desktop companion by Robert Courson. Not affiliated with Meta.</description>
-    <language>en</language>
-  </channel>
-</rss><!-- sparkle-signatures:
-edSignature: Tcz/33+Xyb3SKbifjOpiCTVXtf0Wl+NuHEQNYZ/rT3M+joePjoubtwqEKauhd4tdWBdcYnRrFAr/NT1d5fzjDA==
-length: 691
+-->
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Muse Desktop — Unofficial (x64)</title>
+        <link>https://github.com/robzilla1738/muse-desktop</link>
+        <description>Signed releases of the unofficial Muse Code desktop companion by Robert Courson. Not affiliated with Meta.</description>
+        <language>en</language>
+        <item>
+            <title>0.1.0</title>
+            <pubDate>Mon, 12 Oct 2026 23:38:05 -0500</pubDate>
+            <link>https://github.com/robzilla1738/muse-desktop/releases/tag/v0.1.0</link>
+            <sparkle:version>0.1.0</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/robzilla1738/muse-desktop/releases/download/v0.1.0/Muse-Desktop-0.1.0-x64.zip" length="153322738" type="application/octet-stream" sparkle:edSignature="A8sfIYDtgTi/Jp5nH/WtihDRuQKojnEMkG2odqAppq60yDvlo5sawwTLSoW+JD13o3bgfkDItNjtgKl3aliABw=="/>
+        </item>
+    </channel>
+</rss>
+<!-- sparkle-signatures:
+edSignature: +pjpPVuGojF3oXGwsl+vVtSq2VjveH4Et4lRsyLIf2f5px3k36/ZPjqmpkxKKY7e570uAxlP63FHxrHmzXj/CQ==
+length: 1427
 -->

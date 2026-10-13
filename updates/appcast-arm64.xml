@@ -1,13 +1,26 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
---><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
-  <channel>
-    <title>Muse Desktop — Unofficial (arm64)</title>
-    <link>https://github.com/robzilla1738/muse-desktop</link>
-    <description>Signed releases of the unofficial Muse Code desktop companion by Robert Courson. Not affiliated with Meta.</description>
-    <language>en</language>
-  </channel>
-</rss><!-- sparkle-signatures:
-edSignature: 4pNG47hcug9NPB/hwKfbT+dBZgNwsKf+iWENHnxIR443Y1nXwsJ8SsGO3IgDCpKsY66cD0/dAxdlekv4xYqEBw==
-length: 693
+-->
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Muse Desktop — Unofficial (arm64)</title>
+        <link>https://github.com/robzilla1738/muse-desktop</link>
+        <description>Signed releases of the unofficial Muse Code desktop companion by Robert Courson. Not affiliated with Meta.</description>
+        <language>en</language>
+        <item>
+            <title>0.1.0</title>
+            <pubDate>Mon, 12 Oct 2026 23:34:55 -0500</pubDate>
+            <link>https://github.com/robzilla1738/muse-desktop/releases/tag/v0.1.0</link>
+            <sparkle:version>0.1.0</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/robzilla1738/muse-desktop/releases/download/v0.1.0/Muse-Desktop-0.1.0-arm64.zip" length="146420038" type="application/octet-stream" sparkle:edSignature="0VJPAr0gNUfuSNLYUJoAP7DQCjo/+cZmvgG6Ag1CIbJxJs/Q3SIUbHId22RXOB8CZUze4NPtAfHI42jUDBCECQ=="/>
+        </item>
+    </channel>
+</rss>
+<!-- sparkle-signatures:
+edSignature: NMAGj/ZkBxLXYewTYFzm0qzmKgaCpaiFXAvyu4GvPgsEYZGY8kfnikBkQgh2c6l3WsNTCONP2s70EQJa95PADA==
+length: 1510
 -->
