@@ -47,7 +47,7 @@ A signature alone does not establish a seamless downloaded first launch. Verify 
 
 - `scripts/sparkle-config.json` pins the framework, public Ed25519 key, keychain account, and GitHub repository.
 - The private key is stored under the Keychain account **muse-desktop-robzilla1738**. Back it up securely; losing it can prevent updates to installed apps. Never commit or print it.
-- `updates/appcast-arm64.xml` and `updates/appcast-x64.xml` are signed feeds served from this repository's `main` branch. They initially contain no releases. Do not edit a signed XML feed by hand or run a formatter over it.
+- `updates/appcast-arm64.xml` and `updates/appcast-x64.xml` are signed feeds served from this repository's `main` branch. They contain the published stable releases, starting at 0.1.0. Do not edit a signed XML feed by hand or run a formatter over it.
 - Both feed and archive verification are required by the embedded app configuration. Native update UI is available from the app menu and **Settings → About**. Daily checks are opt-in; automatic installation and system profiling are disabled.
 - The updater rejects relaunch during active CLI turns. Save any unsent draft and finish voice input before installing. Quit handling closes the CLI and cancels transcription.
 

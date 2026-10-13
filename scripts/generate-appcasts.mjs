@@ -30,7 +30,7 @@ const output = resolve(root, 'release/appcasts')
 await mkdir(output, { recursive: true })
 try {
   for (const arch of ['arm64', 'x64']) {
-    const name = `Muse Desktop-${version}-${arch}.zip`
+    const name = `Muse-Desktop-${version}-${arch}.zip`
     const source = join(root, 'release', name)
     const appDirectory = join(temporary, `${arch}-verify`)
     execFileSync('/usr/bin/ditto', ['-xk', source, appDirectory])

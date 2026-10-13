@@ -1,6 +1,6 @@
 appId: org.musedesktop.app
 productName: Muse Desktop
-artifactName: '${productName}-${version}-${arch}.${ext}'
+artifactName: 'Muse-Desktop-${version}-${arch}.${ext}'
 directories:
   output: release
   buildResources: resources

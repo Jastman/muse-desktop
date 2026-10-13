@@ -1,49 +1,41 @@
-# Release readiness — 0.1.0
+# Release verification — 0.1.0
 
-Audit date: October 12, 2026. Target: macOS 13+, Apple Silicon and Intel. Development verification used Apple Silicon with Muse Code 1.4.7 and SDK 1.4.7.
+Verified October 12, 2026, on Apple Silicon with Muse Code 1.4.7 and SDK 1.4.7. Target: macOS 13+, Apple Silicon and Intel.
 
-This is a release candidate. Passing automated checks is not a guarantee of zero bugs or a substitute for notarization and testing on supported hardware.
+[Public source and downloads](https://github.com/robzilla1738/muse-desktop/releases/tag/v0.1.0) are maintained by Robert Courson (@robzilla1738), the sole initial contributor and code owner. This is an **unofficial** community companion, not a Meta product. Private vulnerability reporting, secret scanning, push protection, and main-branch deletion/force-push protection are enabled.
 
-The Apple Silicon app and DMG were rebuilt with a Developer ID Application signature. `codesign --verify --deep --strict` and the DMG checksum verification passed. The standalone app was launched and its real effort control verified against the Plush theme; changing effort preserved the theme. Notarization is deferred until the maintainer configures it. `release/SHA256SUMS.txt` records the current DMG checksum.
+## Distribution
 
-## Fixed during the audit
+Both architecture app bundles and DMG containers are signed with **Developer ID Application: Robert Courson (9F2JXY8TCK)**, accepted by Apple's notarization service, and stapled. Gatekeeper accepts them. The actual ZIP contents were extracted and verified for signature, notarization ticket, architecture, version, and embedded Sparkle key. Release checksums cover both DMGs and both ZIPs.
 
-- Partial preference updates were applying defaults to omitted values. Changing thinking level could reset the theme, background intensity, CLI path, pins, and archives. Updates now use a separate schema without defaults; only native project selection can add project access or trust.
-- The large mascot squeezed history into a clipped strip. Existing conversations now get a compact companion and a scroll region; navigation becomes a row of accessible icon buttons in short windows.
-- Connection setup opens directly to the Muse Code settings section. A missing executable has installation guidance, a custom-path picker, and reconnect controls.
-- Delayed model selection and diff responses no longer overwrite newer navigation. File-list failures clear stale entries and do not report an empty folder as a successful result.
-- macOS CI artifacts now preserve executable permissions. Workflows have timeouts, minimal permissions, pinned action revisions, and a setup/restart smoke test. Dependency update configuration and GitHub contribution/reporting templates are included.
-- Packaged apps include the original source license and artwork notices.
+Sparkle 2.10.0 is embedded through a small Node-API bridge. Its upstream download is SHA-256 pinned. Both update feeds and downloaded archives require Ed25519 signatures. The signing key is stored in the maintainer's Keychain and the protected GitHub `release` environment; only the public key is in source. The live native update check succeeded on Apple Silicon. Installation is user initiated; automatic checks are opt-in and system profiling is disabled.
 
-## Automated verification
+The local notarization profile `muse-desktop` is configured and validated. GitHub-hosted release automation still requires the Apple certificate and notarization secrets listed in [releasing](releasing.md); a local Keychain profile is not available on GitHub runners.
 
-| Check                            | Result                                                                                                 |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| TypeScript and production builds | Passed                                                                                                 |
-| Unit suite                       | 16 passed                                                                                              |
-| Electron suite                   | 11 passed                                                                                              |
-| Real CLI echo integration        | Passed across host restart, history recovery, resume, rename, and streaming                            |
-| Preference regression            | All five themes × four effort levels; unrelated preferences unchanged; persisted after process restart |
-| Sidebar regression               | 880, 780, 740, 680, and 600 px window heights                                                          |
-| First-run failure path           | Missing CLI, setup controls, disabled send, preserved settings after restart                           |
-| Voice UI                         | Simulated recording, WAV conversion, draft insertion, cancellation, no automatic send                  |
-| Dependency audit                 | No reported vulnerabilities                                                                            |
-| Bundle contents                  | App entrypoints, SDK, artwork, and notices present; no preferences or CLI state files                  |
+## Verified behavior
 
-CLI transcription was separately verified using generated speech with the installed authenticated CLI. Repository screenshots use isolated synthetic conversations. No real session exports, account credentials, personal absolute paths, or local configuration are included in the source tree.
+| Check                                     | Result                                                                                              |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| TypeScript, production builds, formatting | Passed                                                                                              |
+| Unit suite                                | 16 passed                                                                                           |
+| Electron suite                            | 11 passed                                                                                           |
+| Public GitHub macOS CI                    | Passed                                                                                              |
+| Real CLI echo integration                 | Restart, history recovery, resume, rename, streaming                                                |
+| Preference regression                     | All five themes × four effort levels; unrelated settings unchanged; persisted after process restart |
+| Sidebar regression                        | Conversation scroll area at 880, 780, 740, 680, and 600 px window heights                           |
+| First-run failure path                    | Missing CLI, setup guidance, disabled send, preserved settings after restart                        |
+| Voice UI                                  | Simulated recording, WAV conversion, draft insertion, cancellation, no automatic send               |
+| Native updater                            | Initialized in the signed app; signed live GitHub feed check succeeded                              |
+| Both release architectures                | Signature, notarization, Gatekeeper, version, architecture, and signed update archive checks passed |
+| Dependency audit                          | No reported vulnerabilities                                                                         |
 
-## Before publishing downloads
+CLI transcription was separately exercised using generated speech with the authenticated installed CLI. Repository screenshots use isolated synthetic conversations. Source excludes credentials, private keys, real transcripts, local preferences, and personal absolute paths.
 
-- Complete notarization and stapling after the maintainer configures credentials. Verify the final app with `codesign`, `spctl`, and `stapler`; test an actual downloaded, quarantined artifact. Local signing alone is insufficient for that claim.
-- Check physical microphone capture and the macOS permission prompt in the final signed build.
-- Test on Intel hardware and the oldest supported macOS version. Those environments have not been verified here.
-- Confirm redistribution rights for the Muse mark and the reference mascot design; see [NOTICE](../NOTICE.md). The MIT source license does not grant these rights.
-- Repository: [robzilla1738/muse-desktop](https://github.com/robzilla1738/muse-desktop). Robert Courson is the sole initial author and code owner. Private security reporting and main-branch history protection are configured at publication.
+## Remaining manual coverage
 
-The GUI supports the workflows listed in [compatibility](compatibility.md). Advanced CLI administration remains available through the Terminal handoff; the app does not claim complete graphical parity with every CLI command.
+- Physical microphone capture and the macOS permission prompt in the final release.
+- Intel hardware and the oldest supported macOS version; both builds were produced and statically verified on Apple Silicon.
+- Installation of a future version through Sparkle; this is the first public version. Signed feed retrieval and archive verification have been exercised.
+- Authenticated tools and model behavior depend on the user's installed Muse CLI and account. Echo tests do not exercise every external tool or model.
 
-## Sparkle and public source
-
-Sparkle 2.10.0 is embedded through a small native Node-API bridge. Its upstream archive is checksum-pinned. Both architecture-specific feeds and update archives require Ed25519 signatures. The private key is in the maintainer's Keychain; the repository contains only its public key. The native updater initialized successfully in the signed Apple Silicon app. About includes update controls and an explicit unofficial notice; the sidebar and GitHub metadata also identify the app as unofficial.
-
-The notarization Keychain profile has been configured and validated with Apple. Signed, notarized release verification is recorded separately when the final artifacts are accepted. CI release signing requires separate GitHub Apple credentials; a local Keychain profile is not transferred to GitHub runners automatically.
+Passing checks does not guarantee zero bugs. Advanced CLI administration uses the Terminal handoff; see [compatibility](compatibility.md). Third-party trademark and character-artwork rights remain separate from the MIT source license; see [NOTICE](../NOTICE.md). The unofficial disclaimer is not a grant of those rights.
