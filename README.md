@@ -10,20 +10,20 @@ A macOS home for Muse Code. Your installed CLI, existing sign-in, project settin
 
 ![Muse Desktop in the default blue theme](docs/screenshots/muse.png)
 
-**[Download 0.1.0](https://github.com/robzilla1738/muse-desktop/releases/tag/v0.1.0)** — Developer ID signed by Robert Courson and notarized by Apple. Both Apple Silicon and Intel installers are available. CI artifacts are separate, unsigned development builds.
+**[Download 0.2.0](https://github.com/robzilla1738/muse-desktop/releases/tag/v0.2.0)** — Developer ID signed by Robert Courson and notarized by Apple. Both Apple Silicon and Intel installers are available. CI artifacts are separate, unsigned development builds.
 
 ## What it does
 
 - Discovers your existing `muse` installation, including your login-shell environment. No separate API key or desktop account.
-- Streams real Muse conversations, reasoning summaries, tool activity, and stored output through the official SDK.
-- Opens and resumes CLI sessions, with naming, search, pinning, local archiving, and Markdown export.
+- Streams real Muse conversations, reasoning summaries, grouped tool activity, and stored output through the official SDK, with language-labeled code blocks and one-click copy.
+- Opens and resumes CLI sessions, with naming, grouped `⌘ K` search, pinning, local archiving, and Markdown export.
 - Presents the CLI's exact approval choices and agent questions. Supports cancellation, queued follow-ups, and steering.
-- Opens local projects, previews files, attaches text and images, and shows Git changes and diffs.
+- Opens local projects with Git branch and working-tree status badges, previews files with breadcrumbs and file-type icons, supports inline `@file` mentions and drag-and-drop file context, and shows line-numbered Git diffs in the project inspector.
 - Includes five themes: **Muse**, **Daylight**, **Moonlight**, **Grove**, and **Plush**, plus macOS appearance matching, text size, reduced motion, and optional completion notifications.
 - Uses native window controls, file pickers, keyboard shortcuts, and project trust dialogs, with theme-matched in-app menus.
-- Records voice with the microphone button or **Option–V**, transcribes through `muse voice transcribe`, and inserts text into the draft for review.
+- Records voice with the microphone button or **Option–V** with live waveform metering, transcribes through `muse voice transcribe`, and inserts text into the draft for review.
 - Imports existing CLI conversation history and discovers its project folders automatically; internal reminders and hooks stay in the Activity inspector.
-- Supports composer commands such as `/clear`, `/voice`, `/model`, `/effort`, `/compact`, and `/rename`; type `/` for suggestions.
+- Supports composer commands such as `/clear`, `/voice`, `/model`, `/effort`, `/compact`, and `/rename`; type `/` for commands or `@` for project files.
 - Opens the full Muse Code CLI from the project inspector for advanced administration and interactive terminal commands.
 - Includes Sparkle 2 updates in packaged builds, with signed feeds and archives. Check manually in **Settings → About**, or opt into daily checks. Installation always requires your action.
 
@@ -34,8 +34,8 @@ A macOS home for Muse Code. Your installed CLI, existing sign-in, project settin
 
 | Mac                      | Download                                                                                                                |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| Apple Silicon (M-series) | [Apple Silicon DMG](https://github.com/robzilla1738/muse-desktop/releases/download/v0.1.0/Muse-Desktop-0.1.0-arm64.dmg) |
-| Intel                    | [Intel DMG](https://github.com/robzilla1738/muse-desktop/releases/download/v0.1.0/Muse-Desktop-0.1.0-x64.dmg)           |
+| Apple Silicon (M-series) | [Apple Silicon DMG](https://github.com/robzilla1738/muse-desktop/releases/download/v0.2.0/Muse-Desktop-0.2.0-arm64.dmg) |
+| Intel                    | [Intel DMG](https://github.com/robzilla1738/muse-desktop/releases/download/v0.2.0/Muse-Desktop-0.2.0-x64.dmg)           |
 
 Requires macOS 13+ and a separately installed, signed-in Muse Code CLI. Open the DMG, drag **Muse Desktop** to **Applications**, and launch it. Desktop discovers your CLI and existing conversations. Use **Settings → Muse Code** if you need to select a custom executable. The first project you work in requires your trust confirmation.
 

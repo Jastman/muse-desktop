@@ -5,13 +5,26 @@ import {
   BookOpen,
   ChevronRight,
   File,
+  FileCode2,
+  FileText,
   Folder,
   FolderOpen,
+  GitBranch,
   Plus,
   Search,
+  X,
 } from 'lucide-react'
-import type { MuseSession, ProjectFile } from '../../../shared/protocol'
-import { projectName } from './Primitives'
+import type { GitStatus, MuseSession, ProjectFile } from '../../../shared/protocol'
+import { friendlyTime, projectName } from './Primitives'
+
+function fileIcon(file: ProjectFile) {
+  if (file.directory) return <Folder size={15} className="file-icon folder" />
+  if (/\.(ts|tsx|js|jsx|mjs|cjs|py|rs|go|rb|java|c|cpp|h|swift|css|scss|html|sh)$/i.test(file.name))
+    return <FileCode2 size={15} className="file-icon code" />
+  if (/\.(md|mdx|txt|json|yaml|yml|toml|lock)$/i.test(file.name))
+    return <FileText size={15} className="file-icon doc" />
+  return <File size={15} className="file-icon" />
+}
 
 export function ProjectsPage({
   projects,
@@ -24,6 +37,30 @@ export function ProjectsPage({
   onOpen: () => void
   onChoose: (path: string) => void
 }) {
+  const [gitMap, setGitMap] = useState<Record<string, GitStatus>>({})
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all(
+      projects.map(async (path) => {
+        try {
+          const status = await window.muse.gitStatus(path)
+          return [path, status] as const
+        } catch {
+          return null
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) return
+      const next: Record<string, GitStatus> = {}
+      for (const entry of entries) {
+        if (entry) next[entry[0]] = entry[1]
+      }
+      setGitMap(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [projects])
   return (
     <section className="workspace-page">
       <div className="page-heading">
@@ -37,22 +74,45 @@ export function ProjectsPage({
         </button>
       </div>
       <div className="project-grid">
-        {projects.map((path, i) => (
-          <button className="project-card" key={path} onClick={() => onChoose(path)}>
-            <span className={`project-card-icon hue-${i % 3}`}>
-              <FolderOpen size={24} strokeWidth={1.5} />
-            </span>
-            <h2>{projectName(path)}</h2>
-            <p>{path.replace(/^\/Users\/[^/]+/, '~')}</p>
-            <footer>
-              <span>
-                {sessions.filter((session) => session.workspaceRoot === path).length} conversations
-                loaded
-              </span>
-              <ArrowUpRight size={16} />
-            </footer>
-          </button>
-        ))}
+        {projects.map((path, i) => {
+          const projectSessions = sessions.filter((session) => session.workspaceRoot === path)
+          const latest = projectSessions
+            .map((session) => session.lastActivityAt || session.updatedAt)
+            .sort()
+            .at(-1)
+          const git = gitMap[path]
+          return (
+            <button className="project-card" key={path} onClick={() => onChoose(path)}>
+              <div className="project-card-top">
+                <span className={`project-card-icon hue-${i % 3}`}>
+                  <FolderOpen size={24} strokeWidth={1.5} />
+                </span>
+                {git?.isRepository && (
+                  <span className="project-git-pills">
+                    {git.branch && (
+                      <span className="project-git-pill">
+                        <GitBranch size={11} />
+                        {git.branch}
+                      </span>
+                    )}
+                    <span className={`project-git-pill ${git.changes.length ? 'dirty' : 'clean'}`}>
+                      {git.changes.length ? `${git.changes.length} changed` : 'Clean'}
+                    </span>
+                  </span>
+                )}
+              </div>
+              <h2>{projectName(path)}</h2>
+              <p>{path.replace(/^\/Users\/[^/]+/, '~')}</p>
+              <footer>
+                <span>
+                  {projectSessions.length} conversation{projectSessions.length === 1 ? '' : 's'}
+                  {latest ? ` · ${friendlyTime(latest)}` : ''}
+                </span>
+                <ArrowUpRight size={16} />
+              </footer>
+            </button>
+          )
+        })}
         <button className="project-card add-project" onClick={onOpen}>
           <Plus size={26} strokeWidth={1.2} />
           <h2>Open project</h2>
@@ -136,74 +196,133 @@ export function FilesPage({
         </button>
       </section>
     )
-  const visibleFiles = files.filter((file) => file.name.toLowerCase().includes(query.toLowerCase()))
+  const visibleFiles = files
+    .filter((file) => file.name.toLowerCase().includes(query.toLowerCase()))
+    .sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name))
+  const segments = directory ? directory.split('/').filter(Boolean) : []
+  const lineCount = selected && content ? content.split('\n').length : 0
   return (
     <section className="workspace-page files-page">
       <div className="page-heading">
         <div>
           <h1>Files</h1>
-          <p>
-            {projectName(project)} <ChevronRight size={12} /> {directory || 'Project root'}
-          </p>
-        </div>
-      </div>
-      <div className="file-browser">
-        <div className="file-browser-list">
-          <div className="file-search">
-            <Search size={15} />
-            <input
-              aria-label="Filter files"
-              placeholder="Find in this folder…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          {directory && (
+          <div className="files-breadcrumbs" aria-label="Folder path">
             <button
-              className="file-row parent-folder"
+              type="button"
+              className={`breadcrumb-segment ${!directory ? 'current' : ''}`}
               onClick={() => {
-                setDirectory(directory.split('/').slice(0, -1).join('/'))
+                setDirectory('')
                 setQuery('')
               }}
             >
-              <ArrowLeft size={14} />
-              Parent folder
+              <FolderOpen size={13} />
+              <span>{projectName(project)}</span>
             </button>
-          )}
-          {error && <p className="inline-error">{error}</p>}
-          {loading && <p className="file-list-message">Opening folder…</p>}
-          {!loading &&
-            visibleFiles.map((file) => (
+            <ChevronRight size={12} />
+            {segments.length === 0 ? (
+              <span className="breadcrumb-segment current">Project root</span>
+            ) : (
+              segments.map((segment, index) => {
+                const segmentPath = segments.slice(0, index + 1).join('/')
+                const isLast = index === segments.length - 1
+                return (
+                  <span key={segmentPath} className="breadcrumb-part">
+                    {index > 0 && <ChevronRight size={12} />}
+                    <button
+                      type="button"
+                      className={`breadcrumb-segment ${isLast ? 'current' : ''}`}
+                      onClick={() => {
+                        setDirectory(segmentPath)
+                        setQuery('')
+                      }}
+                    >
+                      {segment}
+                    </button>
+                  </span>
+                )
+              })
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="file-browser">
+        <div className="file-browser-sidebar">
+          <div className="file-search-bar">
+            <div className="file-search">
+              <Search size={14} />
+              <input
+                aria-label="Filter files"
+                placeholder="Find in this folder…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              {query && (
+                <button
+                  type="button"
+                  className="file-search-clear"
+                  aria-label="Clear filter"
+                  onClick={() => setQuery('')}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="file-browser-list">
+            {directory && (
               <button
-                key={file.path}
-                className={`file-row ${selected === file.path ? 'selected' : ''}`}
+                className="file-row parent-folder"
                 onClick={() => {
-                  if (file.directory) {
-                    setDirectory(file.path)
-                    setQuery('')
-                  } else setSelected(file.path)
+                  setDirectory(directory.split('/').slice(0, -1).join('/'))
+                  setQuery('')
                 }}
               >
-                {file.directory ? <Folder size={15} /> : <File size={15} />}
-                <span>{file.name}</span>
-                {file.directory && <ChevronRight size={12} />}
+                <ArrowLeft size={14} />
+                <span>Parent folder</span>
               </button>
-            ))}
-          {!loading && !error && !visibleFiles.length && (
-            <p className="file-list-message">
-              {query ? 'No matching files.' : 'This folder is empty.'}
-            </p>
-          )}
+            )}
+            {error && <p className="inline-error">{error}</p>}
+            {loading && <p className="file-list-message">Opening folder…</p>}
+            {!loading &&
+              visibleFiles.map((file) => (
+                <button
+                  key={file.path}
+                  aria-label={file.name}
+                  className={`file-row ${selected === file.path ? 'selected' : ''}`}
+                  onClick={() => {
+                    if (file.directory) {
+                      setDirectory(file.path)
+                      setQuery('')
+                    } else setSelected(file.path)
+                  }}
+                >
+                  {fileIcon(file)}
+                  <span>{file.name}</span>
+                  {file.directory && <ChevronRight size={13} className="file-row-chevron" />}
+                </button>
+              ))}
+            {!loading && !error && !visibleFiles.length && (
+              <p className="file-list-message">
+                {query ? 'No matching files.' : 'This folder is empty.'}
+              </p>
+            )}
+          </div>
           <div className="file-list-footnote">
-            {files.length} entries · hidden build dependencies omitted
+            <span>{files.length} entries</span>
+            <span>·</span>
+            <span>build dependencies hidden</span>
           </div>
         </div>
         <div className="file-preview">
           {selected ? (
             <>
               <header>
-                <span>{selected}</span>
-                <button className="text-button" onClick={() => onMention(selected)}>
+                <div className="file-preview-title">
+                  <FileCode2 size={15} />
+                  <span>{selected}</span>
+                  {lineCount > 0 && <small>{lineCount} lines</small>}
+                </div>
+                <button className="file-ask-button text-button" onClick={() => onMention(selected)}>
                   Ask Muse <ArrowUpRight size={12} />
                 </button>
               </header>
@@ -211,9 +330,11 @@ export function FilesPage({
             </>
           ) : (
             <div className="file-preview-empty">
-              <File size={32} strokeWidth={1} />
+              <span className="file-empty-badge">
+                <FileCode2 size={24} strokeWidth={1.4} />
+              </span>
               <h3>File preview</h3>
-              <p>Select a file to preview it.</p>
+              <p>Select a file on the left to inspect its contents or reference it in chat.</p>
             </div>
           )}
         </div>
@@ -266,72 +387,92 @@ const guides = [
 ]
 
 export function DocsPage({ onError }: { onError: (message: string) => void }) {
+  const [openGuides, setOpenGuides] = useState<Record<number, boolean>>({ 0: true })
   return (
     <section className="workspace-page docs-page">
-      <div className="page-heading">
-        <div>
-          <h1>Getting started</h1>
-          <p>Learn the basics and keyboard shortcuts.</p>
+      <div className="docs-container">
+        <div className="page-heading">
+          <div>
+            <h1>Getting started</h1>
+            <p>Learn the basics and keyboard shortcuts.</p>
+          </div>
+          <BookOpen size={32} strokeWidth={1.2} />
         </div>
-        <BookOpen size={32} strokeWidth={1.2} />
+        <div className="guides">
+          {guides.map((guide, i) => {
+            const isOpen = Boolean(openGuides[i])
+            return (
+              <div key={guide.title} className={`guide-item ${isOpen ? 'open' : ''}`}>
+                <button
+                  type="button"
+                  className="guide-summary"
+                  aria-expanded={isOpen}
+                  onClick={() =>
+                    setOpenGuides((current) => ({
+                      ...current,
+                      [i]: !current[i],
+                    }))
+                  }
+                >
+                  <span className="guide-number">0{i + 1}</span>
+                  <span>{guide.title}</span>
+                  <ChevronRight size={15} className="guide-chevron" />
+                </button>
+                <div className={`guide-collapse ${isOpen ? 'open' : ''}`}>
+                  <div className="guide-collapse-inner">
+                    <p>{guide.detail}</p>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="shortcuts-guide">
+          <h2>Keyboard shortcuts</h2>
+          <div>
+            <span>Start or stop voice input</span>
+            <kbd>⌥ V</kbd>
+          </div>
+          <div>
+            <span>Cancel voice input</span>
+            <kbd>Esc</kbd>
+          </div>
+          <div>
+            <span>New conversation</span>
+            <kbd>⌘ N</kbd>
+          </div>
+          <div>
+            <span>Open project</span>
+            <kbd>⌘ O</kbd>
+          </div>
+          <div>
+            <span>Search & commands</span>
+            <kbd>⌘ K</kbd>
+          </div>
+          <div>
+            <span>Settings</span>
+            <kbd>⌘ ,</kbd>
+          </div>
+          <div>
+            <span>Toggle sidebar</span>
+            <kbd>⌘ B</kbd>
+          </div>
+        </div>
+        <button
+          className="button secondary"
+          onClick={() => {
+            void window.muse
+              .openExternal('https://dev.meta.ai/docs/muse-code')
+              .catch((error: Error) => onError(error.message))
+          }}
+        >
+          Muse Code documentation <ArrowUpRight size={14} />
+        </button>
+        <p className="page-footnote">
+          Muse Desktop is an independent community app. Your CLI remains the home of your account
+          and conversations.
+        </p>
       </div>
-      <div className="guides">
-        {guides.map((guide, i) => (
-          <details key={guide.title} open={i === 0}>
-            <summary>
-              <span className="guide-number">0{i + 1}</span>
-              {guide.title}
-              <ChevronRight size={15} />
-            </summary>
-            <p>{guide.detail}</p>
-          </details>
-        ))}
-      </div>
-      <div className="shortcuts-guide">
-        <h2>Keyboard shortcuts</h2>
-        <div>
-          <span>Start or stop voice input</span>
-          <kbd>⌥ V</kbd>
-        </div>
-        <div>
-          <span>Cancel voice input</span>
-          <kbd>Esc</kbd>
-        </div>
-        <div>
-          <span>New conversation</span>
-          <kbd>⌘ N</kbd>
-        </div>
-        <div>
-          <span>Open project</span>
-          <kbd>⌘ O</kbd>
-        </div>
-        <div>
-          <span>Search & commands</span>
-          <kbd>⌘ K</kbd>
-        </div>
-        <div>
-          <span>Settings</span>
-          <kbd>⌘ ,</kbd>
-        </div>
-        <div>
-          <span>Toggle sidebar</span>
-          <kbd>⌘ B</kbd>
-        </div>
-      </div>
-      <button
-        className="button secondary"
-        onClick={() => {
-          void window.muse
-            .openExternal('https://dev.meta.ai/docs/muse-code')
-            .catch((error: Error) => onError(error.message))
-        }}
-      >
-        Muse Code documentation <ArrowUpRight size={14} />
-      </button>
-      <p className="page-footnote">
-        Muse Desktop is an independent community app. Your CLI remains the home of your account and
-        conversations.
-      </p>
     </section>
   )
 }

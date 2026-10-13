@@ -74,7 +74,7 @@ export class MuseHost {
       try {
         this.host = await Promise.race([
           handshake.initialize({
-            clientInfo: { name: 'muse_desktop', title: 'Muse Desktop', version: '0.1.0' },
+            clientInfo: { name: 'muse_desktop', title: 'Muse Desktop', version: '0.2.0' },
             capabilities: { userInputDialogs: true, requestedCapabilities: ['sessionListStream'] },
           }),
           new Promise<never>((_, reject) => {

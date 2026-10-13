@@ -18,10 +18,12 @@ export function VoiceInput({
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [seconds, setSeconds] = useState(0)
+  const [levels, setLevels] = useState<number[]>([0.25, 0.45, 0.35, 0.5, 0.3])
   const capture = useRef<{
     recorder?: MediaRecorder
     stream?: MediaStream
     timer?: ReturnType<typeof setInterval>
+    meterContext?: AudioContext
     generation: number
   }>({ generation: 0 })
   const callbacks = useRef({ onText, onError, onBusy })
@@ -30,6 +32,8 @@ export function VoiceInput({
 
   const release = () => {
     clearInterval(capture.current.timer)
+    void capture.current.meterContext?.close().catch(() => {})
+    capture.current.meterContext = undefined
     capture.current.stream?.getTracks().forEach((track) => track.stop())
     capture.current.stream = undefined
     capture.current.recorder = undefined
@@ -131,13 +135,34 @@ export function VoiceInput({
       recorder.start(250)
       setSeconds(0)
       setPhase('recording')
+      let analyser: AnalyserNode | undefined
+      let samples: Uint8Array<ArrayBuffer> | undefined
+      try {
+        const meterContext = new AudioContext()
+        capture.current.meterContext = meterContext
+        const source = meterContext.createMediaStreamSource(stream)
+        analyser = meterContext.createAnalyser()
+        analyser.fftSize = 32
+        source.connect(analyser)
+        samples = new Uint8Array(analyser.frequencyBinCount)
+      } catch {
+        // Metering is optional visual polish.
+      }
       const started = Date.now()
       capture.current.timer = setInterval(() => {
         const elapsed = Math.floor((Date.now() - started) / 1000)
         setSeconds(elapsed)
+        if (analyser && samples) {
+          analyser.getByteFrequencyData(samples)
+          setLevels(
+            [0, 1, 2, 3, 4].map((index) =>
+              Math.max(0.22, Math.min(1, (samples[index + 1] || 0) / 180)),
+            ),
+          )
+        }
         // Leave room for the final encoder frame before the two-minute limit.
         if (elapsed >= MAX_VOICE_SECONDS - 1 && recorder.state === 'recording') recorder.stop()
-      }, 250)
+      }, 120)
     } catch (error) {
       if (generation !== capture.current.generation) return
       release()
@@ -211,6 +236,17 @@ export function VoiceInput({
       </IconButton>
       {phase !== 'idle' && (
         <div className="voice-status" role="status">
+          {phase === 'recording' && (
+            <span className="voice-waveform" aria-hidden="true">
+              {levels.map((level, index) => (
+                <span
+                  key={index}
+                  className="voice-wave-bar"
+                  style={{ transform: `scaleY(${level.toFixed(2)})` }}
+                />
+              ))}
+            </span>
+          )}
           <span>
             {phase === 'recording'
               ? `Listening · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`

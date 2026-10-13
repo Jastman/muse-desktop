@@ -20,7 +20,7 @@ Functional text uses the macOS system font throughout. Shared tokens define 12 p
 
 Use sentence case and concise action labels. **Project** means a local folder; **conversation** means a Muse session. **Muse Code** names the installed CLI and its settings. **Settings** is used consistently across the sidebar, native menu, command menu, and dialog.
 
-Suggested prompts describe concrete tasks: Plan a feature, Explore the project, Review the code. Keyboard hints are `↵ Send` and `⇧ ↵ New line`. Status text reports facts: Local project, Connected to Muse Code, Permissions: Muse Code settings, Theme: Daylight. Only the welcome headline and mascot greeting carry expressive copy. Avoid duplicate slogans around functional controls.
+Suggested prompts describe concrete tasks: Plan a feature, Explore the project, Review the code. Keyboard hints are `↵ Send` and `⇧ ↵ New line`. Status text reports facts such as Connected to Muse Code. Only the welcome headline and mascot greeting carry expressive copy. Avoid duplicate slogans around functional controls.
 
 ## Accessibility
 

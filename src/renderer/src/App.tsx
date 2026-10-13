@@ -1,7 +1,7 @@
 import { Select } from './components/Select'
 import { isBackgroundOnly } from './activity'
 import { composerCommands, parseComposerCommand } from './commands'
-import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   Archive,
   ArrowRight,
@@ -28,7 +28,6 @@ import {
   Files,
   SquarePen,
   Sparkles,
-  ShieldCheck,
   X,
 } from 'lucide-react'
 import {
@@ -98,7 +97,7 @@ function conversationGroup(session: MuseSession, pinned: string[]) {
 export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => preferencesSchema.parse({}))
   const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting' })
-  const [version, setVersion] = useState('0.1.0')
+  const [version, setVersion] = useState('0.2.0')
   const [sessions, setSessions] = useState<MuseSession[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -116,6 +115,9 @@ export function App() {
   const [page, setPage] = useState<'chat' | 'projects' | 'files' | 'docs'>('chat')
   const [commands, setCommands] = useState(false)
   const [archived, setArchived] = useState(false)
+  const [projectOpen, setProjectOpen] = useState(true)
+  const [conversationsOpen, setConversationsOpen] = useState(true)
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
   const [rename, setRename] = useState(false)
   const [newName, setNewName] = useState('')
   const [toast, setToast] = useState<{ message: string; kind: 'error' | 'success' } | null>(null)
@@ -125,6 +127,7 @@ export function App() {
   const activeId = useRef<string | null>(null)
   const openSequence = useRef(0)
   const historySequence = useRef(0)
+  const hasLoadedHistory = useRef(false)
   const menuHandler = useRef<(action: string) => void>(() => {})
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const theme: Theme =
@@ -137,7 +140,7 @@ export function App() {
   const showSuccess = (message: string) => setToast({ message, kind: 'success' })
   const refreshSessions = useCallback(async () => {
     const sequence = ++historySequence.current
-    setHistoryLoading(true)
+    if (!hasLoadedHistory.current) setHistoryLoading(true)
     setHistoryError('')
     try {
       const collected = new Map<string, MuseSession>()
@@ -154,6 +157,7 @@ export function App() {
           throw new Error('Muse returned a repeated history cursor. Reconnect to refresh history.')
         if (cursor) cursors.add(cursor)
       } while (cursor)
+      hasLoadedHistory.current = true
     } catch (error) {
       if (sequence === historySequence.current)
         setHistoryError(error instanceof Error ? error.message : String(error))
@@ -257,8 +261,10 @@ export function App() {
   }
   const openSession = async (sessionId: string) => {
     setPage('chat')
+    if (activeId.current === sessionId && view?.session.sessionId === sessionId) return
     const sequence = ++openSequence.current
-    setLoadingSession(true)
+    const showSpinner = !view
+    if (showSpinner) setLoadingSession(true)
     activeId.current = sessionId
     try {
       const opened = await window.muse.openSession(sessionId)
@@ -376,10 +382,37 @@ export function App() {
         }
         current = await window.muse.createSession(root, modelId || undefined)
         if (openSequence.current === sequence) activeId.current = current.session.sessionId
-        const newSessionId = current.session.sessionId
-        setDrafts((values) => ({ ...values, [newSessionId]: text }))
-        if (openSequence.current === sequence) setView(current)
       }
+      const submittedSessionId = current.session.sessionId
+      const optimisticItem = {
+        itemId: `optimistic-${Date.now()}`,
+        kind: 'userMessage',
+        revision: 0,
+        status: 'completed',
+        text,
+        displayText: text,
+        recordedAt: new Date().toISOString(),
+      }
+      if (openSequence.current === sequence) {
+        setView((existing) => {
+          const base = existing?.session.sessionId === submittedSessionId ? existing : current!
+          const alreadyHasUserMessage = base.items.some(
+            (item) =>
+              item.kind === 'userMessage' && (item.text === text || item.displayText === text),
+          )
+          return {
+            ...base,
+            session: { ...base.session, status: 'running' },
+            items: alreadyHasUserMessage ? base.items : [...base.items, optimisticItem],
+          }
+        })
+      }
+      setDrafts((values) => ({
+        ...values,
+        [key]: values[key] === text ? '' : values[key] || '',
+        [submittedSessionId]:
+          values[submittedSessionId] === text ? '' : values[submittedSessionId] || '',
+      }))
       await window.muse.send({
         sessionId: current.session.sessionId,
         text,
@@ -387,15 +420,9 @@ export function App() {
         effort: preferences.reasoningEffort,
         mode,
       })
-      const submittedSessionId = current.session.sessionId
-      setDrafts((values) => ({
-        ...values,
-        [key]: values[key] === text ? '' : values[key] || '',
-        [submittedSessionId]:
-          values[submittedSessionId] === text ? '' : values[submittedSessionId] || '',
-      }))
       return true
     } catch (error) {
+      setDrafts((values) => ({ ...values, [key]: values[key] || text }))
       showError(error instanceof Error ? error.message : String(error))
       return false
     } finally {
@@ -442,270 +469,345 @@ export function App() {
           Number(preferences.pinnedSessionIds.includes(a.sessionId)) ||
         (b.lastActivityAt || b.updatedAt).localeCompare(a.lastActivityAt || a.updatedAt),
     )
-  const ThemeIcon = themes.find((entry) => entry.id === theme)!.icon
+  const groupedSessions: { group: string; entries: MuseSession[] }[] = []
+  for (const session of visibleSessions) {
+    const group = conversationGroup(session, preferences.pinnedSessionIds)
+    const last = groupedSessions[groupedSessions.length - 1]
+    if (last && last.group === group) last.entries.push(session)
+    else groupedSessions.push({ group, entries: [session] })
+  }
 
   return (
     <div
       className={`app-shell ${sidebar ? '' : 'sidebar-hidden'} ${inspector ? 'with-inspector' : ''}`}
       style={{ '--background-presence': preferences.backgroundIntensity / 100 } as CSSProperties}
     >
-      {sidebar && (
-        <aside className={`sidebar ${visibleSessions.length ? 'has-conversations' : ''}`}>
-          <div className="sidebar-titlebar">
-            <IconButton label="Hide sidebar" onClick={() => setSidebar(false)}>
-              <PanelLeftClose size={17} />
-            </IconButton>
-          </div>
-          <button className="brand" onClick={startNew} aria-label="Muse home">
-            <MuseMark size={37} />
-            <span>Muse</span>
-            <span className="desktop-tag">Unofficial</span>
-          </button>
-          <nav className="main-nav" aria-label="Main navigation">
-            {(
-              [
-                { id: 'chat', icon: MessageSquare, label: 'Chat' },
-                { id: 'projects', icon: Code2, label: 'Projects' },
-                { id: 'files', icon: Files, label: 'Files' },
-                { id: 'docs', icon: BookOpen, label: 'Docs' },
-              ] as const
-            ).map((entry) => (
-              <button
-                key={entry.id}
-                aria-label={entry.label}
-                title={entry.label}
-                className={page === entry.id ? 'selected' : ''}
-                onClick={() => setPage(entry.id)}
-              >
-                <entry.icon size={19} strokeWidth={1.7} />
-                <span>{entry.label}</span>
-                {page === entry.id && <span className="nav-active-dot" />}
-              </button>
-            ))}
-            <button
-              aria-label="Settings"
-              title="Settings"
-              onClick={() => setSettings('appearance')}
-            >
-              <Settings2 size={19} strokeWidth={1.7} />
-              <span>Settings</span>
-            </button>
-          </nav>
-          <div className="sidebar-primary">
-            <button className="new-button" onClick={startNew}>
-              <Plus size={17} />
-              <span>New conversation</span>
-              <kbd>⌘ N</kbd>
-            </button>
-            <button className="search-button" onClick={() => setCommands(true)}>
+      <aside
+        aria-hidden={!sidebar || undefined}
+        inert={!sidebar ? true : undefined}
+        className={`sidebar ${visibleSessions.length ? 'has-conversations' : ''}`}
+      >
+        <div className="sidebar-titlebar">
+          <IconButton label="Hide sidebar" onClick={() => setSidebar(false)}>
+            <PanelLeftClose size={17} />
+          </IconButton>
+        </div>
+        <button className="brand" onClick={startNew} aria-label="Muse home">
+          <MuseMark size={37} />
+          <span>Muse</span>
+          <span
+            className="desktop-tag"
+            data-tooltip="Community desktop app for Muse Code · Not affiliated with Meta"
+          >
+            Unofficial
+          </span>
+        </button>
+        <div className="sidebar-search">
+          <button className="search-button" onClick={() => setCommands(true)}>
+            <span className="sidebar-item-icon">
               <Search size={15} />
-              <span>Search conversations</span>
-              <kbd>⌘ K</kbd>
+            </span>
+            <span>Search conversations</span>
+            <kbd>⌘ K</kbd>
+          </button>
+        </div>
+        <nav className="main-nav" aria-label="Main navigation">
+          {(
+            [
+              { id: 'chat', icon: MessageSquare, label: 'Chat' },
+              { id: 'projects', icon: Code2, label: 'Projects' },
+              { id: 'files', icon: Files, label: 'Files' },
+              { id: 'docs', icon: BookOpen, label: 'Docs' },
+            ] as const
+          ).map((entry) => (
+            <button
+              key={entry.id}
+              aria-label={entry.label}
+              title={entry.label}
+              className={page === entry.id ? 'selected' : ''}
+              onClick={() => setPage(entry.id)}
+            >
+              <entry.icon size={19} strokeWidth={1.7} />
+              <span>{entry.label}</span>
+              {page === entry.id && <span className="nav-active-dot" />}
             </button>
-          </div>
-          <div className="sidebar-section-label">
-            <span>PROJECT</span>
-            <IconButton
-              label="Open a project"
-              onClick={() => {
-                void chooseProject()
-              }}
-            >
-              <Plus size={14} />
-            </IconButton>
-          </div>
-          <div className="project-switcher">
-            <FolderOpen size={16} />
-            <Select
-              label="Current project"
-              value={project}
-              onChange={(value) => {
-                if (value === '__open') {
-                  void chooseProject()
-                  return
-                }
-                setProject(value)
-                startNew()
-              }}
-              options={[
-                { value: '', label: 'All projects' },
-                ...preferences.recentProjects.map((path) => ({
-                  value: path,
-                  label: projectName(path),
-                })),
-                ...(project && !preferences.recentProjects.includes(project)
-                  ? [{ value: project, label: projectName(project) }]
-                  : []),
-                { value: '__open', label: 'Open another project…' },
-              ]}
+          ))}
+          <button aria-label="Settings" title="Settings" onClick={() => setSettings('appearance')}>
+            <Settings2 size={19} strokeWidth={1.7} />
+            <span>Settings</span>
+          </button>
+        </nav>
+        <div className="sidebar-primary">
+          <button className="new-button" onClick={startNew}>
+            <span className="sidebar-item-icon">
+              <Plus size={15} />
+            </span>
+            <span>New conversation</span>
+            <kbd>⌘ N</kbd>
+          </button>
+        </div>
+        <div className="sidebar-section-label">
+          <button
+            type="button"
+            className="section-toggle"
+            aria-expanded={projectOpen}
+            onClick={() => setProjectOpen((value) => !value)}
+          >
+            <span>PROJECTS</span>
+            <ChevronDown
+              size={12}
+              className={`section-chevron ${projectOpen ? '' : 'collapsed'}`}
             />
+          </button>
+          <IconButton
+            label="Open a project"
+            onClick={() => {
+              void chooseProject()
+            }}
+          >
+            <Plus size={14} />
+          </IconButton>
+        </div>
+        <div className={`sidebar-collapse ${projectOpen ? 'open' : ''}`}>
+          <div className="sidebar-collapse-inner">
+            <div className="project-switcher">
+              <Select
+                label="Current project"
+                value={project}
+                icon={
+                  <span className="sidebar-item-icon">
+                    <FolderOpen size={15} />
+                  </span>
+                }
+                onChange={(value) => {
+                  if (value === '__open') {
+                    void chooseProject()
+                    return
+                  }
+                  setProject(value)
+                  startNew()
+                }}
+                options={[
+                  { value: '', label: 'All projects' },
+                  ...preferences.recentProjects.map((path) => ({
+                    value: path,
+                    label: projectName(path),
+                  })),
+                  ...(project && !preferences.recentProjects.includes(project)
+                    ? [{ value: project, label: projectName(project) }]
+                    : []),
+                  { value: '__open', label: 'Open another project…' },
+                ]}
+              />
+            </div>
           </div>
-          <div className="sidebar-section-label conversations-label">
+        </div>
+        <div className="sidebar-section-label conversations-label">
+          <button
+            type="button"
+            className="section-toggle"
+            aria-expanded={conversationsOpen}
+            onClick={() => setConversationsOpen((value) => !value)}
+          >
             <span>{archived ? 'ARCHIVED' : 'CONVERSATIONS'}</span>
-            <IconButton
-              label={archived ? 'Show conversations' : 'Show archived conversations'}
-              active={archived}
-              onClick={() => setArchived((value) => !value)}
-            >
-              <Archive size={13} />
-            </IconButton>
-          </div>
-          <div className="conversation-list">
-            {historyError && (
-              <div className="history-error">
-                <p>Could not load your conversation history.</p>
-                <p>{historyError}</p>
-                <button
-                  className="text-button"
-                  onClick={() => {
-                    void refreshSessions()
-                  }}
-                >
-                  Try again
-                </button>
-              </div>
-            )}
-            {visibleSessions.map((session, index) => (
-              <Fragment key={session.sessionId}>
-                {(index === 0 ||
-                  conversationGroup(session, preferences.pinnedSessionIds) !==
-                    conversationGroup(
-                      visibleSessions[index - 1],
-                      preferences.pinnedSessionIds,
-                    )) && (
-                  <div className="conversation-group-label">
-                    {conversationGroup(session, preferences.pinnedSessionIds)}
-                  </div>
-                )}
-                <div
-                  className={`conversation-row ${session.sessionId === view?.session.sessionId ? 'selected' : ''}`}
-                >
+            <ChevronDown
+              size={12}
+              className={`section-chevron ${conversationsOpen ? '' : 'collapsed'}`}
+            />
+          </button>
+          <IconButton
+            label={archived ? 'Show conversations' : 'Show archived conversations'}
+            active={archived}
+            onClick={() => setArchived((value) => !value)}
+          >
+            <Archive size={13} />
+          </IconButton>
+        </div>
+        <div className={`conversation-list ${conversationsOpen ? '' : 'is-collapsed'}`}>
+          <div className={`sidebar-collapse ${conversationsOpen ? 'open' : ''}`}>
+            <div className="sidebar-collapse-inner">
+              {historyError && (
+                <div className="history-error">
+                  <p>Could not load your conversation history.</p>
+                  <p>{historyError}</p>
                   <button
-                    className="conversation-link"
-                    title={session.firstUserPrompt || sessionTitle(session)}
+                    className="text-button"
                     onClick={() => {
-                      void openSession(session.sessionId)
+                      void refreshSessions()
                     }}
                   >
-                    <span
-                      className={`conversation-indicator ${session.status === 'running' ? 'running' : ''}`}
-                    >
-                      {preferences.pinnedSessionIds.includes(session.sessionId) ? (
-                        <Pin size={12} />
-                      ) : session.status === 'running' ? (
-                        <span className="working-dot" />
-                      ) : (
-                        <MessageSquare size={13} />
-                      )}
-                    </span>
-                    <span className="conversation-copy">
-                      <span className="conversation-title">{sessionTitle(session)}</span>
-                      {!project && session.workspaceRoot && (
-                        <span className="conversation-project">
-                          {projectName(session.workspaceRoot)}
-                        </span>
-                      )}
-                    </span>
-                    <time>{friendlyTime(session.lastActivityAt || session.updatedAt)}</time>
+                    Try again
                   </button>
-                  <button
-                    className="row-pin"
-                    title={
-                      preferences.pinnedSessionIds.includes(session.sessionId)
-                        ? 'Unpin conversation'
-                        : 'Pin conversation'
-                    }
-                    aria-label={`${preferences.pinnedSessionIds.includes(session.sessionId) ? 'Unpin' : 'Pin'} ${sessionTitle(session)}`}
-                    onClick={() => togglePin(session.sessionId)}
-                  >
-                    <Pin size={12} />
-                  </button>
-                </div>
-              </Fragment>
-            ))}
-            {historyLoading && status.state === 'ready' && (
-              <div className="history-status">
-                <LoaderCircle size={14} className="spin" />
-                <span>Loading Muse history…</span>
-              </div>
-            )}
-            {!visibleSessions.length &&
-              !historyLoading &&
-              !historyError &&
-              status.state === 'ready' && (
-                <div className="sidebar-empty">
-                  <MessageSquare size={19} strokeWidth={1.3} />
-                  <p>{archived ? 'No archived conversations' : 'No conversations yet'}</p>
-                  <span>
-                    {archived
-                      ? 'Archived conversations appear here.'
-                      : 'Start a conversation in this project.'}
-                  </span>
                 </div>
               )}
-            {nextCursor && !historyLoading && (
-              <button
-                className="load-more"
-                onClick={() => {
-                  void window.muse
-                    .listSessions(nextCursor)
-                    .then((result) => {
-                      setSessions((current) => [
-                        ...current,
-                        ...result.sessions.filter(
-                          (entry) =>
-                            !current.some((existing) => existing.sessionId === entry.sessionId),
-                        ),
-                      ])
-                      setNextCursor(result.nextCursor)
-                    })
-                    .catch((error: Error) => showError(error.message))
-                }}
-              >
-                Load earlier conversations
-              </button>
-            )}
-          </div>
-          <div className="sidebar-companion">
-            <img src="./mascot-wave.png" alt="Muse mascot waving hello" />
-            <span>Good to see you!</span>
-            <svg viewBox="0 0 64 8" aria-hidden="true">
-              <path d="M3 4c9-6 18 6 29 0s17 2 28-1" />
-            </svg>
-          </div>
-          <div className="sidebar-bottom">
-            <div className="theme-mini-switch" role="group" aria-label="Appearance">
-              {themes.map((entry) => (
+              {groupedSessions.map(({ group, entries }) => {
+                const groupCollapsed = Boolean(collapsedGroups[group])
+                return (
+                  <div className="conversation-group" key={group}>
+                    <button
+                      type="button"
+                      className="conversation-group-label"
+                      aria-expanded={!groupCollapsed}
+                      onClick={() =>
+                        setCollapsedGroups((current) => ({
+                          ...current,
+                          [group]: !current[group],
+                        }))
+                      }
+                    >
+                      <span>{group}</span>
+                      <ChevronDown
+                        size={12}
+                        className={`section-chevron ${groupCollapsed ? 'collapsed' : ''}`}
+                      />
+                    </button>
+                    <div className={`sidebar-collapse ${groupCollapsed ? '' : 'open'}`}>
+                      <div className="sidebar-collapse-inner">
+                        {entries.map((session) => (
+                          <div
+                            key={session.sessionId}
+                            className={`conversation-row ${session.sessionId === view?.session.sessionId ? 'selected' : ''}`}
+                          >
+                            <button
+                              className="conversation-link"
+                              title={sessionTitle(session)}
+                              onClick={() => {
+                                void openSession(session.sessionId)
+                              }}
+                            >
+                              <span
+                                className={`conversation-indicator sidebar-item-icon ${session.status === 'running' ? 'running' : ''}`}
+                              >
+                                {preferences.pinnedSessionIds.includes(session.sessionId) ? (
+                                  <Pin size={13} />
+                                ) : session.status === 'running' ? (
+                                  <span className="working-dot" />
+                                ) : (
+                                  <MessageSquare size={14} />
+                                )}
+                              </span>
+                              <span className="conversation-copy">
+                                <span className="conversation-title">{sessionTitle(session)}</span>
+                                {!project && session.workspaceRoot && (
+                                  <span className="conversation-project">
+                                    {projectName(session.workspaceRoot)}
+                                  </span>
+                                )}
+                              </span>
+                              <time>
+                                {friendlyTime(session.lastActivityAt || session.updatedAt)}
+                              </time>
+                            </button>
+                            <button
+                              className="row-pin"
+                              title={
+                                preferences.pinnedSessionIds.includes(session.sessionId)
+                                  ? 'Unpin conversation'
+                                  : 'Pin conversation'
+                              }
+                              aria-label={`${preferences.pinnedSessionIds.includes(session.sessionId) ? 'Unpin' : 'Pin'} ${sessionTitle(session)}`}
+                              onClick={() => togglePin(session.sessionId)}
+                            >
+                              <Pin size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              {historyLoading && status.state === 'ready' && (
+                <div className="history-status">
+                  <LoaderCircle size={14} className="spin" />
+                  <span>Loading Muse history…</span>
+                </div>
+              )}
+              {!visibleSessions.length &&
+                !historyLoading &&
+                !historyError &&
+                status.state === 'ready' && (
+                  <div className="sidebar-empty">
+                    <MessageSquare size={19} strokeWidth={1.3} />
+                    <p>{archived ? 'No archived conversations' : 'No conversations yet'}</p>
+                    <span>
+                      {archived
+                        ? 'Archived conversations appear here.'
+                        : 'Start a conversation in this project.'}
+                    </span>
+                  </div>
+                )}
+              {nextCursor && !historyLoading && (
                 <button
-                  key={entry.id}
-                  title={entry.label}
-                  aria-label={`${entry.label} theme`}
-                  aria-pressed={theme === entry.id}
-                  className={theme === entry.id ? 'selected' : ''}
-                  onClick={() => savePreferences({ theme: entry.id })}
+                  className="load-more"
+                  onClick={() => {
+                    void window.muse
+                      .listSessions(nextCursor)
+                      .then((result) => {
+                        setSessions((current) => [
+                          ...current,
+                          ...result.sessions.filter(
+                            (entry) =>
+                              !current.some((existing) => existing.sessionId === entry.sessionId),
+                          ),
+                        ])
+                        setNextCursor(result.nextCursor)
+                      })
+                      .catch((error: Error) => showError(error.message))
+                  }}
                 >
-                  <entry.icon size={14} />
-                  {theme === entry.id && <span>{entry.label}</span>}
+                  Load earlier conversations
                 </button>
-              ))}
+              )}
             </div>
-
-            <button className="connection-status" onClick={() => setSettings('connection')}>
-              <span className={`status-dot ${status.state}`} />
-              <span>
-                {status.state === 'ready'
-                  ? 'Connected to Muse Code'
-                  : status.state === 'connecting'
-                    ? 'Connecting to Muse…'
-                    : 'Muse Code disconnected'}
-              </span>
-              <ArrowUpRight size={11} />
-            </button>
           </div>
-        </aside>
-      )}
+        </div>
+        <div className="sidebar-companion">
+          <img src="./mascot-wave.png" alt="Muse mascot waving hello" />
+          <span>Good to see you!</span>
+          <svg viewBox="0 0 64 8" aria-hidden="true">
+            <path d="M3 4c9-6 18 6 29 0s17 2 28-1" />
+          </svg>
+        </div>
+        <div className="sidebar-bottom">
+          <div className="theme-mini-switch" role="group" aria-label="Appearance">
+            {themes.map((entry) => (
+              <button
+                key={entry.id}
+                title={entry.label}
+                aria-label={`${entry.label} theme`}
+                aria-pressed={theme === entry.id}
+                className={theme === entry.id ? 'selected' : ''}
+                onClick={() => savePreferences({ theme: entry.id })}
+              >
+                <entry.icon size={14} />
+                <span className="theme-mini-label">
+                  <span>{entry.label}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <button className="connection-status" onClick={() => setSettings('connection')}>
+            <span className={`status-dot ${status.state}`} />
+            <span>
+              {status.state === 'ready'
+                ? 'Connected to Muse Code'
+                : status.state === 'connecting'
+                  ? 'Connecting to Muse…'
+                  : 'Muse Code disconnected'}
+            </span>
+            <ArrowUpRight size={11} />
+          </button>
+        </div>
+      </aside>
       <main className="main-workspace">
-        {page === 'chat' && <div className="chat-brand-background" aria-hidden="true" />}
+        {page === 'chat' && (
+          <>
+            <div className={`welcome-art theme-${theme}`} aria-hidden="true" />
+            <div className="chat-brand-background" aria-hidden="true" />
+          </>
+        )}
         <header className={`workspace-titlebar ${sidebar ? '' : 'with-traffic-lights'}`}>
           <div className="workspace-breadcrumb">
             {!sidebar && (
@@ -732,12 +834,6 @@ export function App() {
             <IconButton label="Search conversations and commands" onClick={() => setCommands(true)}>
               <Search size={17} />
             </IconButton>
-            {project && (
-              <span className="local-pill">
-                <span />
-                Local project
-              </span>
-            )}
             {view && (
               <details className="conversation-menu">
                 <summary aria-label="Conversation actions">
@@ -836,7 +932,6 @@ export function App() {
               <Transcript key={view.session.sessionId} view={view} onError={showError} />
             ) : (
               <div className="welcome">
-                <div className={`welcome-art theme-${theme}`} aria-hidden="true" />
                 <div className="welcome-content">
                   <div className="welcome-kicker">
                     <span className="tiny-spark">✳</span>MUSE CODE, ON YOUR MAC
@@ -891,7 +986,6 @@ export function App() {
             {!loadingSession && (
               <div className={`composer-dock ${view ? 'conversation-dock' : ''}`}>
                 <Composer
-                  key={draftKey}
                   draft={draft}
                   setDraft={(value) => setDrafts((current) => ({ ...current, [draftKey]: value }))}
                   running={Boolean(running)}
@@ -899,6 +993,7 @@ export function App() {
                   submitting={submitting}
                   connected={status.state === 'ready'}
                   hasProject={Boolean(project)}
+                  project={project}
                   models={models}
                   modelId={modelId}
                   preferences={preferences}
@@ -917,37 +1012,22 @@ export function App() {
             )}
           </div>
         )}
-        <footer className="workspace-statusbar">
-          <span>
-            <ShieldCheck size={11} />
-            {view?.session.approvalMode?.mode === 'allowAll'
-              ? 'Permissions: Allow all'
-              : 'Permissions: Muse Code settings'}
-          </span>
-          <span>
-            {status.state === 'connecting' ? (
-              <>
-                <LoaderCircle size={10} className="spin" />
-                Connecting
-              </>
-            ) : (
-              <>
-                <ThemeIcon size={11} />
-                Theme: {theme[0].toUpperCase() + theme.slice(1)}
-              </>
-            )}
-          </span>
-        </footer>
       </main>
-      {inspector && (
-        <Inspector
-          key={project}
-          project={project}
-          view={view}
-          onClose={() => setInspector(false)}
-          onError={showError}
-        />
-      )}
+      <Inspector
+        key={project}
+        open={inspector}
+        project={project}
+        view={view}
+        onClose={() => setInspector(false)}
+        onMentionDiff={(path) => {
+          setPage('chat')
+          setDrafts((current) => ({
+            ...current,
+            [draftKey]: `${current[draftKey] || ''}${current[draftKey] ? '\n' : ''}Please review the changes in @${path}\n`,
+          }))
+        }}
+        onError={showError}
+      />
       {settings && (
         <Settings
           initialTab={settings}

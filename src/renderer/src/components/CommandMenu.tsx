@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import {
   ArrowUpRight,
   FolderOpen,
@@ -37,6 +37,7 @@ export function CommandMenu({
   const commands = [
     {
       id: 'new',
+      group: 'Actions',
       title: 'New conversation',
       subtitle: 'Start a conversation',
       icon: Plus,
@@ -45,6 +46,7 @@ export function CommandMenu({
     },
     {
       id: 'open',
+      group: 'Actions',
       title: 'Open project',
       subtitle: 'Choose a folder on your Mac',
       icon: FolderOpen,
@@ -53,14 +55,25 @@ export function CommandMenu({
     },
     {
       id: 'settings',
+      group: 'Actions',
       title: 'Open settings',
       subtitle: 'Appearance and Muse Code connection',
       icon: Settings2,
       shortcut: '⌘ ,',
       action: onSettings,
     },
+    ...sessions.map((session) => ({
+      id: session.sessionId,
+      group: 'Recent conversations',
+      title: sessionTitle(session),
+      subtitle: session.workspaceRoot?.split('/').at(-1) || 'Conversation',
+      icon: MessageSquare,
+      shortcut: '',
+      action: () => onSession(session.sessionId),
+    })),
     {
       id: 'muse',
+      group: 'Themes',
       title: 'Switch to Muse',
       subtitle: 'Electric blue',
       icon: Palette,
@@ -69,6 +82,7 @@ export function CommandMenu({
     },
     {
       id: 'daylight',
+      group: 'Themes',
       title: 'Switch to Daylight',
       subtitle: 'Warm and light',
       icon: Sun,
@@ -77,6 +91,7 @@ export function CommandMenu({
     },
     {
       id: 'moonlight',
+      group: 'Themes',
       title: 'Switch to Moonlight',
       subtitle: 'Soft and dark',
       icon: Moon,
@@ -85,6 +100,7 @@ export function CommandMenu({
     },
     {
       id: 'grove',
+      group: 'Themes',
       title: 'Switch to Grove',
       subtitle: 'Natural green',
       icon: Leaf,
@@ -93,25 +109,24 @@ export function CommandMenu({
     },
     {
       id: 'plush',
+      group: 'Themes',
       title: 'Switch to Plush',
       subtitle: 'Blue mascot close-up',
       icon: Smile,
       shortcut: '',
       action: () => onTheme('plush'),
     },
-    ...sessions.map((session) => ({
-      id: session.sessionId,
-      title: sessionTitle(session),
-      subtitle: session.workspaceRoot?.split('/').at(-1) || 'Conversation',
-      icon: MessageSquare,
-      shortcut: '',
-      action: () => onSession(session.sessionId),
-    })),
   ]
     .filter((entry) =>
       `${entry.title} ${entry.subtitle}`.toLowerCase().includes(query.toLowerCase()),
     )
     .slice(0, 30)
+  useEffect(() => {
+    const active = commands[selected]
+    if (active) {
+      document.getElementById(`cmd-item-${active.id}`)?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [selected, commands])
   const invoke = (index: number) => {
     const command = commands[index]
     if (command) {
@@ -150,19 +165,24 @@ export function CommandMenu({
       </div>
       <div className="command-results">
         {commands.map((command, i) => (
-          <button
-            key={command.id}
-            className={i === selected ? 'selected' : ''}
-            onClick={() => invoke(i)}
-            onMouseEnter={() => setSelected(i)}
-          >
-            <command.icon size={17} />
-            <span>
-              <strong>{command.title}</strong>
-              <small>{command.subtitle}</small>
-            </span>
-            {command.shortcut ? <kbd>{command.shortcut}</kbd> : <ArrowUpRight size={14} />}
-          </button>
+          <Fragment key={command.id}>
+            {(i === 0 || commands[i - 1].group !== command.group) && (
+              <div className="command-group-heading">{command.group}</div>
+            )}
+            <button
+              id={`cmd-item-${command.id}`}
+              className={i === selected ? 'selected' : ''}
+              onClick={() => invoke(i)}
+              onMouseEnter={() => setSelected(i)}
+            >
+              <command.icon size={17} />
+              <span>
+                <strong>{command.title}</strong>
+                <small>{command.subtitle}</small>
+              </span>
+              {command.shortcut ? <kbd>{command.shortcut}</kbd> : <ArrowUpRight size={14} />}
+            </button>
+          </Fragment>
         ))}
         {!commands.length && (
           <div className="command-empty">No matches. Try a project or conversation name.</div>

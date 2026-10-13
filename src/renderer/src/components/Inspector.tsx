@@ -1,6 +1,7 @@
 import { activityTitle } from '../activity'
 import { useEffect, useState } from 'react'
 import {
+  ArrowUpRight,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -15,15 +16,51 @@ import {
 import type { GitStatus, SessionView } from '../../../shared/protocol'
 import { IconButton, projectName } from './Primitives'
 
+function parseDiffLines(diff: string) {
+  let oldLine = 0
+  let newLine = 0
+  return diff.split('\n').map((line) => {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+    if (hunk) {
+      oldLine = Number(hunk[1])
+      newLine = Number(hunk[2])
+      return { kind: 'hunk' as const, oldNum: '', newNum: '', text: line }
+    }
+    if (
+      line.startsWith('---') ||
+      line.startsWith('+++') ||
+      line.startsWith('diff ') ||
+      line.startsWith('index ')
+    ) {
+      return { kind: 'meta' as const, oldNum: '', newNum: '', text: line }
+    }
+    if (line.startsWith('+')) {
+      const num = newLine ? String(newLine++) : ''
+      return { kind: 'added' as const, oldNum: '', newNum: num, text: line }
+    }
+    if (line.startsWith('-')) {
+      const num = oldLine ? String(oldLine++) : ''
+      return { kind: 'removed' as const, oldNum: num, newNum: '', text: line }
+    }
+    const o = oldLine ? String(oldLine++) : ''
+    const n = newLine ? String(newLine++) : ''
+    return { kind: 'context' as const, oldNum: o, newNum: n, text: line }
+  })
+}
+
 export function Inspector({
+  open = true,
   project,
   view,
   onClose,
+  onMentionDiff,
   onError,
 }: {
+  open?: boolean
   project: string
   view: SessionView | null
   onClose: () => void
+  onMentionDiff?: (path: string) => void
   onError: (message: string) => void
 }) {
   const [tab, setTab] = useState<'changes' | 'activity'>('changes')
@@ -34,6 +71,7 @@ export function Inspector({
   const [diff, setDiff] = useState('')
   const [refreshVersion, setRefreshVersion] = useState(0)
   useEffect(() => {
+    if (!open) return
     let cancelled = false
     setGit(undefined)
     setSelected('')
@@ -55,9 +93,9 @@ export function Inspector({
     return () => {
       cancelled = true
     }
-  }, [project, view?.session.status, refreshVersion])
+  }, [open, project, view?.session.status, refreshVersion])
   useEffect(() => {
-    if (!selected) return
+    if (!open || !selected) return
     let cancelled = false
     setDiff('Loading diff…')
     void window.muse
@@ -74,14 +112,19 @@ export function Inspector({
     return () => {
       cancelled = true
     }
-  }, [project, selected, onError])
+  }, [open, project, selected, onError])
   const activity =
     view?.items.filter(
       (item) =>
         !item.retracted && !['userMessage', 'agentMessage', 'reasoning'].includes(item.kind),
     ) || []
   return (
-    <aside className="inspector" aria-label="Project inspector">
+    <aside
+      className="inspector"
+      aria-label="Project inspector"
+      aria-hidden={!open || undefined}
+      inert={!open ? true : undefined}
+    >
       <header>
         <span>Project inspector</span>
         <IconButton label="Close inspector" onClick={onClose}>
@@ -127,25 +170,41 @@ export function Inspector({
             {error && <p className="inline-error">{error}</p>}
             {selected ? (
               <>
-                <button className="diff-back" onClick={() => setSelected('')}>
-                  <ChevronLeft size={13} />
-                  {selected}
-                </button>
+                <div className="diff-header">
+                  <button className="diff-back" onClick={() => setSelected('')}>
+                    <ChevronLeft size={13} />
+                    <span>{selected}</span>
+                  </button>
+                  {onMentionDiff && (
+                    <button
+                      type="button"
+                      className="diff-ask-button"
+                      onClick={() => onMentionDiff(selected)}
+                    >
+                      Ask Muse <ArrowUpRight size={11} />
+                    </button>
+                  )}
+                </div>
                 <pre className="diff-view">
-                  {diff.split('\n').map((line, i) => (
+                  {parseDiffLines(diff).map((row, i) => (
                     <span
                       key={i}
                       className={
-                        line.startsWith('+')
+                        row.kind === 'added'
                           ? 'added'
-                          : line.startsWith('-')
+                          : row.kind === 'removed'
                             ? 'removed'
-                            : line.startsWith('@@')
+                            : row.kind === 'hunk'
                               ? 'hunk'
-                              : ''
+                              : row.kind === 'meta'
+                                ? 'meta'
+                                : ''
                       }
                     >
-                      {line || ' '}
+                      <span className="diff-gutter" aria-hidden="true">
+                        {row.newNum || row.oldNum || ' '}
+                      </span>
+                      {row.text || ' '}
                       <br />
                     </span>
                   ))}

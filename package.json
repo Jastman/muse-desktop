@@ -1,7 +1,7 @@
 {
   "name": "muse-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Unofficial macOS desktop companion for Muse Code. Not affiliated with Meta.",
   "author": {
     "name": "Robert Courson",

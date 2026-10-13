@@ -31,7 +31,7 @@ export function Select({
     const rect = trigger.current.getBoundingClientRect()
     const menu = popup.current
     menu.style.minWidth = `${Math.max(rect.width, 200)}px`
-    menu.style.maxHeight = `${Math.min(360, Math.max(rect.top, innerHeight - rect.bottom) - 16)}px`
+    menu.style.maxHeight = `${Math.min(420, Math.max(rect.top, innerHeight - rect.bottom) - 16)}px`
     const above = innerHeight - rect.bottom < menu.offsetHeight + 12
     menu.style.top = `${Math.max(8, above ? rect.top - menu.offsetHeight - 8 : rect.bottom + 8)}px`
     menu.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - menu.offsetWidth - 8))}px`

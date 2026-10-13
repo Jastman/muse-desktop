@@ -33,7 +33,7 @@ test('a missing installation has actionable setup and preserves preferences afte
     await expect(page.getByRole('heading', { name: 'Muse Code connection' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Open installation guide' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Save & reconnect' })).toBeVisible()
-    await page.getByRole('button', { name: 'm About', exact: true }).click()
+    await page.getByRole('button', { name: 'About', exact: true }).click()
     await expect(
       page.getByText('An unofficial, open-source companion for Muse Code by Robert Courson.'),
     ).toBeVisible()

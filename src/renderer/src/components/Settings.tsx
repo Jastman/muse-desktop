@@ -15,7 +15,7 @@ import {
   Terminal,
 } from 'lucide-react'
 import type { ConnectionStatus, Preferences, Theme, UpdateStatus } from '../../../shared/protocol'
-import { Dialog } from './Primitives'
+import { Dialog, MuseMark } from './Primitives'
 
 export const themes: { id: Theme; label: string; description: string; icon: typeof Sun }[] = [
   { id: 'muse', label: 'Muse', description: 'Electric blue', icon: Palette },
@@ -65,7 +65,8 @@ export function Settings({
             Muse Code
           </button>
           <button className={tab === 'about' ? 'selected' : ''} onClick={() => setTab('about')}>
-            <span className="about-dot">m</span>About
+            <MuseMark size={16} />
+            About
           </button>
         </nav>
         <div className="settings-content">

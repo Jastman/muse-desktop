@@ -93,13 +93,36 @@ export function MuseMark({ size = 26 }: { size?: number }) {
 export function projectName(path: string) {
   return path.split('/').filter(Boolean).at(-1) || path
 }
+function stripInjectedTags(value?: string) {
+  if (!value) return ''
+  let text = value
+  for (let i = 0; i < 4; i++) {
+    const next = text.replace(/<([a-zA-Z_][\w.-]*)\b[^>]*>[\s\S]*?<\/\1>/g, '')
+    if (next === text) break
+    text = next
+  }
+  const closingIndex = text.lastIndexOf('</')
+  if (closingIndex !== -1) {
+    const closeEnd = text.indexOf('>', closingIndex)
+    if (closeEnd !== -1 && /^<\/[a-zA-Z_][\w.-]*>$/.test(text.slice(closingIndex, closeEnd + 1))) {
+      text = text.slice(closeEnd + 1)
+    }
+  }
+  return text.replace(/^<[a-zA-Z_][\w.-]*\b[^>]*>[\s\S]*/i, '').trim()
+}
+export function cleanPromptText(value?: string) {
+  return stripInjectedTags(value).replace(/\s+/g, ' ').trim()
+}
+export function cleanMessageText(value?: string) {
+  return stripInjectedTags(value)
+}
 export function sessionTitle(session: { name?: string; title?: string; firstUserPrompt?: string }) {
-  return (
-    session.name ||
-    session.title ||
-    session.firstUserPrompt?.slice(0, 80) ||
-    'Untitled conversation'
-  )
+  const raw =
+    cleanPromptText(session.name) ||
+    cleanPromptText(session.title) ||
+    cleanPromptText(session.firstUserPrompt)
+  if (!raw) return 'Untitled conversation'
+  return raw.length > 76 ? `${raw.slice(0, 76).trimEnd()}…` : raw
 }
 export function friendlyTime(value: string) {
   const date = new Date(value)
