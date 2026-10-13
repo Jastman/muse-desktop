@@ -12,6 +12,7 @@ files:
   - NOTICE.md
 asar: true
 afterPack: scripts/package-sparkle.mjs
+afterAllArtifactBuild: scripts/notarize-dmgs.mjs
 mac:
   category: public.app-category.developer-tools
   icon: resources/icon.icns
@@ -28,6 +29,8 @@ mac:
   entitlementsInherit: resources/entitlements.mac.plist
   notarize: true
 dmg:
+  sign: true
+  writeUpdateInfo: false
   title: Muse Desktop
   window:
     width: 540

@@ -43,6 +43,13 @@ jobs:
         run: npx playwright test tests/e2e/setup.spec.ts
       - name: Verify notarized archives and generate signed Sparkle feeds
         run: npm run release:appcast
+      - name: Verify signed and stapled disk images
+        run: |
+          for image in release/*.dmg; do
+            codesign --verify --strict "$image"
+            xcrun stapler validate "$image"
+            spctl --assess --type open --context context:primary-signature "$image"
+          done
       - name: Checksum distribution files
         working-directory: release
         run: shasum -a 256 *.dmg *.zip > SHA256SUMS.txt

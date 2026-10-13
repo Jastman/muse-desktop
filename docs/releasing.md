@@ -34,7 +34,7 @@ With the certificate in Keychain and the profile configured:
 APPLE_KEYCHAIN_PROFILE=muse-desktop npm run dist -- --config.forceCodeSigning=true
 ```
 
-This builds signed, notarized DMGs and ZIPs for Apple Silicon and Intel. To build a signed candidate before notarization is configured:
+This builds signed, notarized apps for Apple Silicon and Intel, packages them as DMGs and ZIPs, then signs, notarizes, and staples the DMG containers as well. To build a signed candidate before notarization is configured:
 
 ```sh
 npm run build
@@ -74,7 +74,7 @@ The manually dispatched **Publish signed macOS release** workflow runs only from
 | `APPLE_TEAM_ID`               | Apple developer team                                         |
 | `SPARKLE_PRIVATE_KEY`         | Sparkle Ed25519 seed exported from the maintainer's Keychain |
 
-The workflow checks formatting, unit tests, compilation, setup/restart behavior, signing, and notarization. It creates a draft release with both architecture downloads and checksums, publishes it, then commits the signed feeds using Robert's GitHub identity. Missing credentials or failed verification stop publication. The initial repository setup does not imply that all Apple CI secrets have been configured.
+The workflow checks formatting, unit tests, compilation, setup/restart behavior, signing, and notarization. It creates a draft release with both architecture downloads and checksums, publishes it, then commits the signed feeds using Robert's GitHub identity. Missing credentials or failed verification stop publication. The `SPARKLE_PRIVATE_KEY` environment secret is configured. Apple signing and notarization secrets still need to be supplied for GitHub-hosted releases; the local Keychain profile already supports releases from the maintainer’s Mac.
 
 Before running it:
 
