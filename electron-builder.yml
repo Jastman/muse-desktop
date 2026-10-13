@@ -1,0 +1,42 @@
+appId: org.musedesktop.app
+productName: Muse Desktop
+artifactName: '${productName}-${version}-${arch}.${ext}'
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**/*
+  - resources/icon.png
+  - package.json
+  - LICENSE
+  - NOTICE.md
+asar: true
+afterPack: scripts/package-sparkle.mjs
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  minimumSystemVersion: '13.0'
+  hardenedRuntime: true
+  extendInfo:
+    NSMicrophoneUsageDescription: Muse Desktop records your voice only when you start voice input, then uses your Muse Code CLI to transcribe it into a draft.
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  notarize: true
+dmg:
+  title: Muse Desktop
+  window:
+    width: 540
+    height: 360
+  contents:
+    - x: 140
+      y: 165
+    - x: 400
+      y: 165
+      type: link
+      path: /Applications
+publish: null
