@@ -39,11 +39,19 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            script: package:linux
+            script: dist:linux
+            artifact: unsigned-linux-app
+            files: |
+              release/Muse-Desktop-*-linux-*.AppImage
+              release/Muse-Desktop-*-linux-*.tar.gz
           - os: windows-latest
-            script: package:win
+            script: dist:win
+            artifact: unsigned-windows-app
+            files: |
+              release/Muse-Desktop-*-win-*.exe
+              release/Muse-Desktop-*-win-*.zip
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -53,3 +61,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run ${{ matrix.script }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          retention-days: 7
