@@ -98,6 +98,7 @@ export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => preferencesSchema.parse({}))
   const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting' })
   const [version, setVersion] = useState('0.2.0')
+  const [platform, setPlatform] = useState('darwin')
   const [sessions, setSessions] = useState<MuseSession[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [historyLoading, setHistoryLoading] = useState(true)
@@ -132,6 +133,8 @@ export function App() {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const theme: Theme =
     preferences.theme === 'system' ? (darkSystem ? 'moonlight' : 'daylight') : preferences.theme
+  const modKey = platform === 'darwin' ? '⌘' : 'Ctrl'
+  const altKey = platform === 'darwin' ? '⌥' : 'Alt+'
   const draftKey = view?.session.sessionId || `new:${project}`
   const draft = drafts[draftKey] || ''
   const running = view?.session.status === 'running'
@@ -219,6 +222,7 @@ export function App() {
         setPreferences(data.preferences)
         setStatus(data.status)
         setVersion(data.version)
+        setPlatform(data.platform || 'darwin')
         setProject(data.preferences.recentProjects[0] || '')
       })
       .catch((error: Error) => showError(error.message))
@@ -300,6 +304,26 @@ export function App() {
     if (action === 'settings') setSettings('appearance')
     if (action === 'sidebar') setSidebar((value) => !value)
   }
+  useEffect(() => {
+    if (platform === 'darwin') return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      const key = event.key.toLowerCase()
+      const actions: Record<string, string> = {
+        n: 'new',
+        o: 'open',
+        k: 'search',
+        ',': 'settings',
+        b: 'sidebar',
+      }
+      const action = actions[key]
+      if (!action) return
+      event.preventDefault()
+      menuHandler.current(action)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [platform])
 
   const submit = async (attachments: Attachment[], mode: 'queue' | 'steer') => {
     setSubmitting(true)
@@ -322,7 +346,7 @@ export function App() {
         if (name === 'voice') {
           if (argument === 'status')
             showSuccess(
-              'Use ⌥V to start or stop recording. Muse Code transcribes speech into your draft.',
+              `Use ${altKey}V to start or stop recording. Muse Code transcribes speech into your draft.`,
             )
           else if (argument === 'cancel') window.dispatchEvent(new Event('muse:voice-cancel'))
           else if (!argument) window.dispatchEvent(new Event('muse:voice'))
@@ -482,6 +506,37 @@ export function App() {
       className={`app-shell ${sidebar ? '' : 'sidebar-hidden'} ${inspector ? 'with-inspector' : ''}`}
       style={{ '--background-presence': preferences.backgroundIntensity / 100 } as CSSProperties}
     >
+      {platform !== 'darwin' && (
+        <div className="window-traffic-lights" role="group" aria-label="Window controls">
+          <button
+            type="button"
+            className="traffic-light close"
+            aria-label="Close window"
+            title="Close"
+            onClick={() => {
+              void window.muse.windowAction('close')
+            }}
+          />
+          <button
+            type="button"
+            className="traffic-light minimize"
+            aria-label="Minimize window"
+            title="Minimize"
+            onClick={() => {
+              void window.muse.windowAction('minimize')
+            }}
+          />
+          <button
+            type="button"
+            className="traffic-light maximize"
+            aria-label="Maximize window"
+            title="Maximize"
+            onClick={() => {
+              void window.muse.windowAction('maximize')
+            }}
+          />
+        </div>
+      )}
       <aside
         aria-hidden={!sidebar || undefined}
         inert={!sidebar ? true : undefined}
@@ -508,7 +563,7 @@ export function App() {
               <Search size={15} />
             </span>
             <span>Search conversations</span>
-            <kbd>⌘ K</kbd>
+            <kbd>{modKey} K</kbd>
           </button>
         </div>
         <nav className="main-nav" aria-label="Main navigation">
@@ -543,7 +598,7 @@ export function App() {
               <Plus size={15} />
             </span>
             <span>New conversation</span>
-            <kbd>⌘ N</kbd>
+            <kbd>{modKey} N</kbd>
           </button>
         </div>
         <div className="sidebar-section-label">
@@ -920,7 +975,7 @@ export function App() {
             }}
           />
         )}
-        {page === 'docs' && <DocsPage onError={showError} />}
+        {page === 'docs' && <DocsPage platform={platform} onError={showError} />}
         {page === 'chat' && (
           <div className="workspace-body">
             {loadingSession ? (
@@ -934,7 +989,12 @@ export function App() {
               <div className="welcome">
                 <div className="welcome-content">
                   <div className="welcome-kicker">
-                    <span className="tiny-spark">✳</span>MUSE CODE, ON YOUR MAC
+                    <span className="tiny-spark">✳</span>
+                    {platform === 'win32'
+                      ? 'MUSE CODE, ON WINDOWS'
+                      : platform === 'linux'
+                        ? 'MUSE CODE, ON LINUX'
+                        : 'MUSE CODE, ON YOUR MAC'}
                   </div>
                   <h1>
                     Good things start
@@ -1017,6 +1077,7 @@ export function App() {
         key={project}
         open={inspector}
         project={project}
+        platform={platform}
         view={view}
         onClose={() => setInspector(false)}
         onMentionDiff={(path) => {
@@ -1034,6 +1095,7 @@ export function App() {
           preferences={preferences}
           status={status}
           version={version}
+          platform={platform}
           onSave={savePreferences}
           onClose={() => setSettings(false)}
           onError={showError}
@@ -1042,6 +1104,7 @@ export function App() {
       )}
       {commands && (
         <CommandMenu
+          platform={platform}
           sessions={sessions.filter(
             (session) => !preferences.archivedSessionIds.includes(session.sessionId),
           )}

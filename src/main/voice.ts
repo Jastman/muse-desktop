@@ -1,12 +1,8 @@
-import { execFile } from 'node:child_process'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { promisify } from 'node:util'
-import { discoverCli } from './cli'
+import { discoverCli, execCli } from './cli'
 import { MAX_VOICE_BYTES, VOICE_SAMPLE_RATE } from '../shared/voice'
-
-const execute = promisify(execFile)
 
 export function validateVoiceAudio(value: unknown): Buffer {
   if (
@@ -60,7 +56,7 @@ export class VoiceTranscriber {
       directory = await mkdtemp(join(tmpdir(), 'muse-desktop-voice-'))
       const path = join(directory, 'recording.wav')
       await writeFile(path, data, { mode: 0o600 })
-      const { stdout } = await execute(cli.path, ['voice', 'transcribe', path], {
+      const { stdout } = await execCli(cli.path, ['voice', 'transcribe', path], {
         env: cli.environment,
         signal: controller.signal,
         timeout: 90_000,

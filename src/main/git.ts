@@ -1,17 +1,42 @@
 import { execFile } from 'node:child_process'
 import { readFile, realpath, stat } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { delimiter, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { GitChange, GitStatus } from '../shared/protocol'
 
 const execute = promisify(execFile)
+function gitEnvironment() {
+  const isWindows = process.platform === 'win32'
+  const extra = isWindows
+    ? [
+        process.env.ProgramFiles ? join(process.env.ProgramFiles, 'Git', 'cmd') : '',
+        process.env.ProgramFiles ? join(process.env.ProgramFiles, 'Git', 'bin') : '',
+      ]
+    : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
+  const pathValue = [
+    ...new Set([...(process.env.PATH || process.env.Path || '').split(delimiter), ...extra]),
+  ]
+    .filter(Boolean)
+    .join(delimiter)
+  return {
+    ...process.env,
+    PATH: pathValue,
+    ...(isWindows ? { Path: pathValue } : {}),
+    GIT_OPTIONAL_LOCKS: '0',
+    GIT_TERMINAL_PROMPT: '0',
+  }
+}
 const git = (project: string, args: string[]) =>
-  execute('/usr/bin/git', ['--no-pager', '-c', 'core.quotepath=false', ...args], {
-    cwd: project,
-    timeout: 10000,
-    maxBuffer: 4 * 1024 * 1024,
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_TERMINAL_PROMPT: '0' },
-  })
+  execute(
+    process.platform === 'win32' ? 'git.exe' : 'git',
+    ['--no-pager', '-c', 'core.quotepath=false', ...args],
+    {
+      cwd: project,
+      timeout: 10000,
+      maxBuffer: 4 * 1024 * 1024,
+      env: gitEnvironment(),
+    },
+  )
 
 export function parseGitStatus(output: string): GitChange[] {
   const records = output.split('\0')

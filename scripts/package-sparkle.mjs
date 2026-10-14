@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { config, prepareSparkle, root } from './prepare-sparkle.mjs'
 
 export default async function afterPack(context) {
-  if (context.electronPlatformName !== 'darwin') throw new Error('Muse Desktop requires macOS.')
+  if (context.electronPlatformName !== 'darwin') return
   const arch = { 1: 'x64', 3: 'arm64' }[context.arch]
   if (!arch) throw new Error('Build Apple Silicon and Intel as separate architectures.')
   const sparkle = await prepareSparkle()

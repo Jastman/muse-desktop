@@ -29,6 +29,7 @@ export function Settings({
   preferences,
   status,
   version,
+  platform = 'darwin',
   onSave,
   onClose,
   onError,
@@ -38,6 +39,7 @@ export function Settings({
   preferences: Preferences
   status: ConnectionStatus
   version: string
+  platform?: string
   onSave: (patch: Partial<Preferences>) => void
   onClose: () => void
   onError: (message: string) => void
@@ -109,7 +111,7 @@ export function Settings({
                 <div>
                   <span className="setting-label">
                     <Monitor size={16} />
-                    Follow macOS appearance
+                    {platform === 'darwin' ? 'Follow macOS appearance' : 'Follow system appearance'}
                   </span>
                   <small>Use Daylight in light mode and Moonlight in dark mode.</small>
                 </div>
@@ -292,7 +294,12 @@ export function Settings({
               <UpdateSettings onError={onError} />
               <div className="about-facts">
                 <span>
-                  Built for macOS <Check size={13} />
+                  {platform === 'win32'
+                    ? 'Built for Windows'
+                    : platform === 'linux'
+                      ? 'Built for Linux'
+                      : 'Built for macOS'}{' '}
+                  <Check size={13} />
                 </span>
                 <span>
                   Your CLI, your credentials <Check size={13} />

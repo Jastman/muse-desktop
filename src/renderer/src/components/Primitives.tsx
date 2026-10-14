@@ -91,7 +91,7 @@ export function MuseMark({ size = 26 }: { size?: number }) {
 }
 
 export function projectName(path: string) {
-  return path.split('/').filter(Boolean).at(-1) || path
+  return path.split(/[\\/]/).filter(Boolean).at(-1) || path
 }
 function stripInjectedTags(value?: string) {
   if (!value) return ''

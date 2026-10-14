@@ -51,6 +51,7 @@ function parseDiffLines(diff: string) {
 export function Inspector({
   open = true,
   project,
+  platform = 'darwin',
   view,
   onClose,
   onMentionDiff,
@@ -58,6 +59,7 @@ export function Inspector({
 }: {
   open?: boolean
   project: string
+  platform?: string
   view: SessionView | null
   onClose: () => void
   onMentionDiff?: (path: string) => void
@@ -212,27 +214,30 @@ export function Inspector({
               </>
             ) : (
               <>
-                {git?.changes.map((change) => (
-                  <button
-                    className="changed-file"
-                    key={change.path}
-                    onClick={() => setSelected(change.path)}
-                  >
-                    <FileCode2 size={15} />
-                    <span>
-                      <strong>{change.path.split('/').at(-1)}</strong>
-                      <small>
-                        {change.path.includes('/')
-                          ? change.path.slice(0, change.path.lastIndexOf('/'))
-                          : 'Project root'}
-                      </small>
-                    </span>
-                    <b className={change.status.includes('D') ? 'deleted' : ''}>
-                      {change.status === '??' ? 'U' : change.status}
-                    </b>
-                    <ChevronRight size={12} />
-                  </button>
-                ))}
+                {git?.changes.map((change) => {
+                  const normalizedPath = change.path.replaceAll('\\', '/')
+                  return (
+                    <button
+                      className="changed-file"
+                      key={change.path}
+                      onClick={() => setSelected(change.path)}
+                    >
+                      <FileCode2 size={15} />
+                      <span>
+                        <strong>{normalizedPath.split('/').at(-1)}</strong>
+                        <small>
+                          {normalizedPath.includes('/')
+                            ? normalizedPath.slice(0, normalizedPath.lastIndexOf('/'))
+                            : 'Project root'}
+                        </small>
+                      </span>
+                      <b className={change.status.includes('D') ? 'deleted' : ''}>
+                        {change.status === '??' ? 'U' : change.status}
+                      </b>
+                      <ChevronRight size={12} />
+                    </button>
+                  )
+                })}
                 {!loading && !git?.changes.length && !error && (
                   <div className="inspector-empty">
                     <span className="empty-glyph">
@@ -324,7 +329,7 @@ export function Inspector({
           }}
         >
           <FolderOpen size={14} />
-          Finder
+          {platform === 'win32' ? 'Explorer' : platform === 'linux' ? 'Files' : 'Finder'}
         </button>
         <button
           disabled={!project}

@@ -102,7 +102,9 @@ export function ProjectsPage({
                 )}
               </div>
               <h2>{projectName(path)}</h2>
-              <p>{path.replace(/^\/Users\/[^/]+/, '~')}</p>
+              <p>
+                {path.replace(/^(?:\/Users\/[^/]+|\/home\/[^/]+|[A-Za-z]:\\Users\\[^\\]+)/, '~')}
+              </p>
               <footer>
                 <span>
                   {projectSessions.length} conversation{projectSessions.length === 1 ? '' : 's'}
@@ -386,8 +388,16 @@ const guides = [
   },
 ]
 
-export function DocsPage({ onError }: { onError: (message: string) => void }) {
+export function DocsPage({
+  platform = 'darwin',
+  onError,
+}: {
+  platform?: string
+  onError: (message: string) => void
+}) {
   const [openGuides, setOpenGuides] = useState<Record<number, boolean>>({ 0: true })
+  const modKey = platform === 'darwin' ? '⌘' : 'Ctrl'
+  const altKey = platform === 'darwin' ? '⌥' : 'Alt'
   return (
     <section className="workspace-page docs-page">
       <div className="docs-container">
@@ -431,7 +441,7 @@ export function DocsPage({ onError }: { onError: (message: string) => void }) {
           <h2>Keyboard shortcuts</h2>
           <div>
             <span>Start or stop voice input</span>
-            <kbd>⌥ V</kbd>
+            <kbd>{altKey} V</kbd>
           </div>
           <div>
             <span>Cancel voice input</span>
@@ -439,23 +449,23 @@ export function DocsPage({ onError }: { onError: (message: string) => void }) {
           </div>
           <div>
             <span>New conversation</span>
-            <kbd>⌘ N</kbd>
+            <kbd>{modKey} N</kbd>
           </div>
           <div>
             <span>Open project</span>
-            <kbd>⌘ O</kbd>
+            <kbd>{modKey} O</kbd>
           </div>
           <div>
             <span>Search & commands</span>
-            <kbd>⌘ K</kbd>
+            <kbd>{modKey} K</kbd>
           </div>
           <div>
             <span>Settings</span>
-            <kbd>⌘ ,</kbd>
+            <kbd>{modKey} ,</kbd>
           </div>
           <div>
             <span>Toggle sidebar</span>
-            <kbd>⌘ B</kbd>
+            <kbd>{modKey} B</kbd>
           </div>
         </div>
         <button

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { listProjectFiles, readProjectFile } from '../../src/main/files'
 import { parseGitStatus } from '../../src/main/git'
 import { readPreferences, writePreferences } from '../../src/main/preferences'
+import { projectName } from '../../src/renderer/src/components/Primitives'
 import { preferencesPatchSchema, preferencesSchema } from '../../src/shared/protocol'
 
 let temporary: string
@@ -32,6 +33,18 @@ describe('project filesystem boundary', () => {
     await writeFile(join(temporary, 'large'), 'x'.repeat(512 * 1024 + 1))
     await expect(readProjectFile(temporary, 'binary')).rejects.toThrow('binary')
     await expect(readProjectFile(temporary, 'large')).rejects.toThrow('512 KB')
+  })
+  it('normalizes nested project file paths and extracts project names across platforms', async () => {
+    const nested = join(temporary, 'nested')
+    await mkdir(nested)
+    await writeFile(join(nested, 'index.ts'), 'export {}')
+    expect(await listProjectFiles(temporary, 'nested')).toEqual([
+      { name: 'index.ts', path: 'nested/index.ts', directory: false },
+    ])
+    expect(projectName('/Users/alice/muse-desktop')).toBe('muse-desktop')
+    expect(projectName('/home/alice/muse-desktop/')).toBe('muse-desktop')
+    expect(projectName('C:\\Users\\alice\\muse-desktop')).toBe('muse-desktop')
+    expect(projectName('D:\\projects\\muse-desktop\\')).toBe('muse-desktop')
   })
 })
 

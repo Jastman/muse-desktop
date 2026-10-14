@@ -1,6 +1,6 @@
 # Design system
 
-Muse Desktop uses a persistent sidebar, one primary conversation pane, and an optional project inspector. Native traffic lights sit in a draggable titlebar. Messages and the titlebar sit directly on the background without shadow panels or a header divider. The composer stays visible while conversation content scrolls; the view follows incoming messages only while the reader is near the bottom.
+Muse Desktop uses a persistent sidebar, one primary conversation pane, and an optional project inspector. Traffic lights sit in a draggable titlebar (using native inset traffic lights on macOS and matching custom traffic-light window controls on frameless Windows and Linux windows). Messages and the titlebar sit directly on the background without shadow panels or a header divider. The composer stays visible while conversation content scrolls; the view follows incoming messages only while the reader is near the bottom.
 
 ## Themes
 
@@ -14,7 +14,7 @@ All five themes share the same interaction structure; Daylight, Moonlight, and G
 
 ## Typography
 
-Functional text uses the macOS system font throughout. Shared tokens define 12 px captions and keyboard hints, 13 px supporting text, 14 px controls, and 15 px default conversation text. Section and page headings use a consistent weight hierarchy; code uses SF Mono/Menlo at readable sizes. Compact conversation text is 14 px; Large is 17 px. Layouts adapt through wrapping and spacing instead of shrinking small labels. Supporting text has stronger contrast in every theme. The welcome wordmark alone retains its expressive serif treatment.
+Functional text uses a cross-platform system font stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'Inter', 'Ubuntu', 'Cantarell', system-ui, sans-serif`) throughout. Shared tokens define 12 px captions and keyboard hints, 13 px supporting text, 14 px controls, and 15 px default conversation text. Section and page headings use a consistent weight hierarchy; code uses SF Mono, Cascadia Mono, JetBrains Mono, Menlo, or Consolas at readable sizes. Compact conversation text is 14 px; Large is 17 px. Layouts adapt through wrapping and spacing instead of shrinking small labels. Supporting text has stronger contrast in every theme. The welcome wordmark alone retains its expressive serif treatment.
 
 ## Copy conventions
 

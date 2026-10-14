@@ -46,6 +46,7 @@ const api: DesktopAPI = {
   exportSession: (sessionId) => invoke('export', sessionId),
   readOutput: (sessionId, itemId) => invoke('output', sessionId, itemId),
   openExternal: (url) => invoke('external', url),
+  windowAction: (action) => invoke('window-action', action),
   onEvent: (callback) => {
     const listener = (_event: IpcRendererEvent, data: AppEvent) => callback(data)
     ipcRenderer.on('muse:event', listener)

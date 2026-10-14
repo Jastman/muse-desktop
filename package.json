@@ -2,7 +2,7 @@
   "name": "muse-desktop",
   "private": true,
   "version": "0.2.0",
-  "description": "Unofficial macOS desktop companion for Muse Code. Not affiliated with Meta.",
+  "description": "Unofficial macOS, Windows, and Linux desktop companion for Muse Code. Not affiliated with Meta.",
   "author": {
     "name": "Robert Courson",
     "url": "https://github.com/robzilla1738"
@@ -19,7 +19,11 @@
     "test:integration": "tsx scripts/verify-muse.ts",
     "test:e2e": "playwright test",
     "package": "npm run build && electron-builder --mac --dir",
+    "package:win": "npm run build && electron-builder --win --dir",
+    "package:linux": "npm run build && electron-builder --linux --dir",
     "dist": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "package:unsigned": "npm run build && electron-builder --mac --dir -c.mac.identity=null -c.mac.notarize=false",

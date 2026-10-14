@@ -21,7 +21,7 @@ export async function listProjectFiles(project: string, directory: string): Prom
     )
     .map((entry) => ({
       name: entry.name,
-      path: relative(root, join(target, entry.name)),
+      path: relative(root, join(target, entry.name)).replaceAll('\\', '/'),
       directory: entry.isDirectory(),
     }))
     .sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name))

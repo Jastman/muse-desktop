@@ -2,7 +2,7 @@
 
 This unofficial project is created and maintained by [Robert Courson (@robzilla1738)](https://github.com/robzilla1738). Meta does not maintain or support it. Robert is the sole initial contributor and code owner. Third-party dependency and asset credits remain in NOTICE.md.
 
-Use Node.js 22.12+ on macOS and run `npm ci`. Start the app with `npm run dev`. Install Muse Code separately when working on the integration.
+Use Node.js 22.12+ on macOS, Windows, or Linux and run `npm ci`. Start the app with `npm run dev`. Install Muse Code separately when working on the integration.
 
 Keep changes focused. Include a screenshot for appearance changes, describe the user-visible behavior, and explain how it was checked. Interface copy should use sentence case, explicit actions, and the same terms across menus, pages, and dialogs: **project**, **conversation**, **Muse Code**, **Settings**, **Send**, and **New line**. Reserve expressive copy for the welcome headline and mascot greeting.
 
@@ -24,4 +24,4 @@ For protocol upgrades, update the pinned SDK, run the real-CLI tests, inspect sc
 
 Open an issue for substantial changes before implementation. Use the repository's private security reporting feature for security-sensitive findings; see `SECURITY.md`.
 
-Packaged builds require Xcode Command Line Tools and compile `native/sparkle.mm` using stable Node-API headers. The pinned Sparkle framework is downloaded and checksum-verified automatically. Forks must replace the repository URL, public update key, and keychain account in `scripts/sparkle-config.json`, re-sign their initial feeds, and use their own app identifier and signing identity before distribution. Never distribute a fork that points at the upstream update feed.
+Packaged macOS builds require Xcode Command Line Tools and compile `native/sparkle.mm` using stable Node-API headers. The pinned Sparkle framework is downloaded and checksum-verified automatically; Windows and Linux builds skip the Sparkle hook and package directly as pure Electron targets. Forks must replace the repository URL, public update key, and keychain account in `scripts/sparkle-config.json`, re-sign their initial feeds, and use their own app identifier and signing identity before distribution. Never distribute a fork that points at the upstream update feed.

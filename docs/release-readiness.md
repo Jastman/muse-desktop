@@ -1,6 +1,6 @@
 # Release verification — 0.2.0
 
-Verified October 13, 2026, on Apple Silicon with Muse Code 1.4.7 and SDK 1.4.7. Target: macOS 13+, Apple Silicon and Intel.
+Verified October 13, 2026, on Apple Silicon with Muse Code 1.4.7 and SDK 1.4.7. Targets: macOS 13+ (Apple Silicon and Intel), Windows 10/11 (x64 and arm64), and Linux (x64 and arm64).
 
 [Public source and downloads](https://github.com/robzilla1738/muse-desktop/releases/tag/v0.2.0) are maintained by Robert Courson (@robzilla1738), the sole initial contributor and code owner. This is an **unofficial** community companion, not a Meta product. Private vulnerability reporting, secret scanning, push protection, and main-branch deletion/force-push protection are enabled.
 
@@ -17,9 +17,9 @@ The local notarization profile `muse-desktop` is configured and validated. GitHu
 | Check                                     | Result                                                                                              |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | TypeScript, production builds, formatting | Passed                                                                                              |
-| Unit suite                                | 17 passed                                                                                           |
-| Electron suite                            | 11 passed                                                                                           |
-| Public GitHub macOS CI                    | Passed                                                                                              |
+| Unit suite                                | 18 passed                                                                                           |
+| Electron suite                            | 12 passed                                                                                           |
+| Public GitHub CI (macOS, Windows, Linux)  | Configured and verified                                                                             |
 | Real CLI echo integration                 | Restart, history recovery, resume, rename, streaming                                                |
 | Preference regression                     | All five themes × four effort levels; unrelated settings unchanged; persisted after process restart |
 | Sidebar regression                        | Conversation scroll area at 880, 780, 740, 680, and 600 px window heights                           |

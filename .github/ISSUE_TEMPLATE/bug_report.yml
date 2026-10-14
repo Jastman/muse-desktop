@@ -20,8 +20,8 @@ body:
   - type: input
     id: versions
     attributes:
-      label: App, Muse Code, and macOS versions
-      description: Find app and CLI versions in Settings. Include Apple Silicon or Intel.
+      label: App, Muse Code, and OS versions
+      description: Find app and CLI versions in Settings. Include macOS (Apple Silicon or Intel), Windows, or Linux distribution and architecture.
     validations:
       required: true
   - type: textarea

@@ -13,9 +13,10 @@ import {
   Smile,
 } from 'lucide-react'
 import type { MuseSession, Theme } from '../../../shared/protocol'
-import { Dialog, sessionTitle } from './Primitives'
+import { Dialog, projectName, sessionTitle } from './Primitives'
 
 export function CommandMenu({
+  platform = 'darwin',
   sessions,
   onSession,
   onNew,
@@ -24,6 +25,7 @@ export function CommandMenu({
   onTheme,
   onClose,
 }: {
+  platform?: string
   sessions: MuseSession[]
   onSession: (id: string) => void
   onNew: () => void
@@ -34,6 +36,7 @@ export function CommandMenu({
 }) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
+  const modKey = platform === 'darwin' ? '⌘' : 'Ctrl'
   const commands = [
     {
       id: 'new',
@@ -41,16 +44,16 @@ export function CommandMenu({
       title: 'New conversation',
       subtitle: 'Start a conversation',
       icon: Plus,
-      shortcut: '⌘ N',
+      shortcut: `${modKey} N`,
       action: onNew,
     },
     {
       id: 'open',
       group: 'Actions',
       title: 'Open project',
-      subtitle: 'Choose a folder on your Mac',
+      subtitle: platform === 'darwin' ? 'Choose a folder on your Mac' : 'Choose a project folder',
       icon: FolderOpen,
-      shortcut: '⌘ O',
+      shortcut: `${modKey} O`,
       action: onOpen,
     },
     {
@@ -59,14 +62,14 @@ export function CommandMenu({
       title: 'Open settings',
       subtitle: 'Appearance and Muse Code connection',
       icon: Settings2,
-      shortcut: '⌘ ,',
+      shortcut: `${modKey} ,`,
       action: onSettings,
     },
     ...sessions.map((session) => ({
       id: session.sessionId,
       group: 'Recent conversations',
       title: sessionTitle(session),
-      subtitle: session.workspaceRoot?.split('/').at(-1) || 'Conversation',
+      subtitle: session.workspaceRoot ? projectName(session.workspaceRoot) : 'Conversation',
       icon: MessageSquare,
       shortcut: '',
       action: () => onSession(session.sessionId),

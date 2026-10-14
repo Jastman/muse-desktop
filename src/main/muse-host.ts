@@ -60,13 +60,15 @@ export class MuseHost {
     let handshake: ReturnType<typeof spawnMspConnection> | undefined
     try {
       const cli = await discoverCli(cliPath)
+      const isCmdWrapper = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cli.path)
+      const serveArgs = [
+        'serve',
+        '--trust-workspace',
+        ...(process.env.MUSE_DESKTOP_TEST_PROVIDER === 'echo' ? ['--provider', 'echo'] : []),
+      ]
       handshake = spawnMspConnection({
-        command: cli.path,
-        args: [
-          'serve',
-          '--trust-workspace',
-          ...(process.env.MUSE_DESKTOP_TEST_PROVIDER === 'echo' ? ['--provider', 'echo'] : []),
-        ],
+        command: isCmdWrapper ? process.env.ComSpec || 'cmd.exe' : cli.path,
+        args: isCmdWrapper ? ['/d', '/s', '/c', cli.path, ...serveArgs] : serveArgs,
         env: cli.environment,
         shutdownTimeoutMs: 3000,
       })

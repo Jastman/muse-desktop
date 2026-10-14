@@ -6,7 +6,7 @@ The GUI requires the Muse Session Protocol exposed by `muse serve`. Protocol fin
 
 ## Supported desktop workflows
 
-Automatic CLI discovery; custom CLI path; session listing, reading, resuming, renaming and exporting; local pins and archives; streamed messages and tool items; reasoning summaries; server-provided approval choices; agent questions; stop, queue and steer; model selection and reasoning effort; text/image attachments; project file previews; Git status/diff; Finder and Terminal handoff; appearance settings and completion notifications; microphone recording and CLI voice transcription; full CLI handoff from the inspector.
+Automatic CLI discovery across macOS, Windows, and Linux; custom CLI path; session listing, reading, resuming, renaming and exporting; local pins and archives; streamed messages and tool items; reasoning summaries; server-provided approval choices; agent questions; stop, queue and steer; model selection and reasoning effort; text/image attachments; project file previews; Git status/diff; Finder / Explorer / Files and Terminal handoff; appearance settings and completion notifications; microphone recording and CLI voice transcription; full CLI handoff from the inspector.
 
 ## Practical limits
 

@@ -4,15 +4,21 @@ Muse Desktop is an **unofficial** project maintained by Robert Courson. Keep the
 
 ## Local builds
 
-Use macOS 13+, Node.js 22.12+, and Xcode Command Line Tools:
+Use macOS 13+ (with Xcode Command Line Tools), Windows 10/11, or Linux, and Node.js 22.12+:
 
 ```sh
 npm ci
 npm run package:unsigned
 npm run dist:unsigned
+
+# Windows and Linux packages
+npm run package:win
+npm run dist:win
+npm run package:linux
+npm run dist:linux
 ```
 
-The packaging hook downloads Sparkle 2.10.0 from its official release, verifies the pinned SHA-256 checksum, compiles the Node-API bridge, and embeds the framework before code signing. Downloaded tools stay in ignored `.cache/sparkle/`. No key is required to build the app: its public verification key is source controlled.
+On macOS, the packaging hook downloads Sparkle 2.10.0 from its official release, verifies the pinned SHA-256 checksum, compiles the Node-API bridge, and embeds the framework before code signing. Downloaded tools stay in ignored `.cache/sparkle/`. No key is required to build the app: its public verification key is source controlled. Windows and Linux builds skip Sparkle and package directly.
 
 Local unsigned builds and CI artifacts are for development. Do not remove quarantine as a substitute for signing and notarization.
 

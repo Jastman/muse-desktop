@@ -1,7 +1,10 @@
 :root {
   color-scheme: light;
-  --font-family-ui: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-  --font-family-code: 'SF Mono', Menlo, monospace;
+  --font-family-ui:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', 'Inter', 'Ubuntu',
+    'Cantarell', 'Helvetica Neue', system-ui, sans-serif;
+  --font-family-code:
+    'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
   --font-caption: 12px;
   --font-support: 13px;
   --font-ui: 14px;

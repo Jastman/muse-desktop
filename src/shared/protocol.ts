@@ -253,5 +253,6 @@ export interface DesktopAPI {
   exportSession(sessionId: string): Promise<string | null>
   readOutput(sessionId: string, itemId: string): Promise<string>
   openExternal(url: string): Promise<void>
+  windowAction(action: 'minimize' | 'maximize' | 'close'): Promise<void>
   onEvent(callback: (event: AppEvent) => void): () => void
 }

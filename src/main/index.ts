@@ -11,7 +11,7 @@ import {
   systemPreferences,
   type IpcMainInvokeEvent,
 } from 'electron'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -52,6 +52,10 @@ app.setPath(
 
 const directory = fileURLToPath(new URL('.', import.meta.url))
 const execute = promisify(execFile)
+const runtimePlatform =
+  !app.isPackaged && process.env.MUSE_DESKTOP_PLATFORM
+    ? process.env.MUSE_DESKTOP_PLATFORM
+    : process.platform
 const id = z.string().min(1).max(200)
 const pathSchema = z.string().min(1).max(4096)
 const rendererPath = resolve(directory, '../renderer/index.html')
@@ -98,7 +102,10 @@ function trustedSender(event: IpcMainInvokeEvent) {
   const developmentUrl = process.env.ELECTRON_RENDERER_URL
   const trusted =
     app.isPackaged || !developmentUrl
-      ? url.protocol === 'file:' && fileURLToPath(url) === rendererPath
+      ? url.protocol === 'file:' &&
+        (process.platform === 'win32'
+          ? resolve(fileURLToPath(url)).toLowerCase() === rendererPath.toLowerCase()
+          : fileURLToPath(url) === rendererPath)
       : url.origin === new URL(developmentUrl).origin
   if (!trusted) throw new Error('Untrusted app origin.')
 }
@@ -139,8 +146,21 @@ async function savePreferences(patch: Partial<Preferences>) {
 
 async function knownProject(value: unknown) {
   const project = await realpath(pathSchema.parse(value))
-  if (!preferences.recentProjects.includes(project))
-    throw new Error('Choose this project using Open project first.')
+  const resolvedRecent = await Promise.all(
+    preferences.recentProjects.map(async (entry) => {
+      try {
+        return await realpath(entry)
+      } catch {
+        return entry
+      }
+    }),
+  )
+  const matches = resolvedRecent.some((entry) =>
+    process.platform === 'win32'
+      ? entry.toLowerCase() === project.toLowerCase()
+      : entry === project,
+  )
+  if (!matches) throw new Error('Choose this project using Open project first.')
   return project
 }
 
@@ -169,27 +189,64 @@ async function sessionProject(sessionId: string) {
   return project
 }
 
-async function openTerminalCommand(command: string) {
-  // argv carries the command as data; no project path is interpolated into AppleScript.
-  await execute(
-    '/usr/bin/osascript',
-    [
-      '-e',
-      'on run argv',
-      '-e',
-      'tell application "Terminal"',
-      '-e',
-      'activate',
-      '-e',
-      'do script (item 1 of argv)',
-      '-e',
-      'end tell',
-      '-e',
-      'end run',
-      command,
-    ],
-    { timeout: 10000 },
-  )
+async function openProjectTerminal(project: string, cliArgs?: string[]) {
+  const cliBinary = muse.status.path || 'muse'
+  if (process.platform === 'darwin') {
+    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+    const suffix = cliArgs ? ` && ${[cliBinary, ...cliArgs].map(quote).join(' ')}` : ''
+    // argv carries the command as data; no project path is interpolated into AppleScript.
+    await execute(
+      '/usr/bin/osascript',
+      [
+        '-e',
+        'on run argv',
+        '-e',
+        'tell application "Terminal"',
+        '-e',
+        'activate',
+        '-e',
+        'do script (item 1 of argv)',
+        '-e',
+        'end tell',
+        '-e',
+        'end run',
+        `cd ${quote(project)}${suffix}`,
+      ],
+      { timeout: 10000 },
+    )
+    return
+  }
+  if (process.platform === 'win32') {
+    const cmdArgs = cliArgs ? ['/k', cliBinary, ...cliArgs] : []
+    await execute('cmd.exe', ['/c', 'start', '', '/d', project, 'cmd.exe', ...cmdArgs], {
+      timeout: 10000,
+    })
+    return
+  }
+  const terminals = [
+    'x-terminal-emulator',
+    'gnome-terminal',
+    'konsole',
+    'xfce4-terminal',
+    'kitty',
+    'alacritty',
+    'wezterm',
+    'xterm',
+  ]
+  for (const terminal of terminals) {
+    try {
+      await execute('sh', ['-c', 'command -v "$1" >/dev/null 2>&1', '--', terminal], {
+        timeout: 3000,
+      })
+      const args = cliArgs ? ['-e', cliBinary, ...cliArgs] : []
+      const child = spawn(terminal, args, { cwd: project, detached: true, stdio: 'ignore' })
+      child.unref()
+      return
+    } catch {
+      // Try the next installed desktop terminal emulator.
+    }
+  }
+  throw new Error('Could not find a desktop terminal emulator.')
 }
 
 function setupIPC() {
@@ -212,7 +269,7 @@ function setupIPC() {
     status: muse.status,
     version: app.getVersion(),
     home: homedir(),
-    platform: process.platform,
+    platform: runtimePlatform,
   }))
   handle('connect', async () => {
     if (muse.hasActiveTurns()) {
@@ -435,14 +492,11 @@ function setupIPC() {
   handle('terminal', async (projectValue, loginValue) => {
     const project = await knownProject(projectValue)
     const login = z.boolean().optional().parse(loginValue)
-    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
-    const command = `cd ${quote(project)}${login ? ` && ${quote(muse.status.path || 'muse')} login` : ''}`
-    await openTerminalCommand(command)
+    await openProjectTerminal(project, login ? ['login'] : undefined)
   })
   handle('cli-terminal', async (value) => {
     const project = await knownProject(value)
-    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
-    await openTerminalCommand(`cd ${quote(project)} && ${quote(muse.status.path || 'muse')}`)
+    await openProjectTerminal(project, [])
   })
 
   handle('export', async (value) => {
@@ -472,25 +526,43 @@ function setupIPC() {
       throw new Error('Only web links can be opened.')
     await shell.openExternal(url.toString())
   })
+  handle('window-action', (value) => {
+    const action = z.enum(['minimize', 'maximize', 'close']).parse(value)
+    if (!window) return
+    if (action === 'minimize') window.minimize()
+    else if (action === 'maximize') {
+      if (window.isMaximized()) window.unmaximize()
+      else window.maximize()
+    } else window.close()
+  })
 }
 
-function createWindow() {
+function createWindow(iconPath: string) {
+  const isMac = runtimePlatform === 'darwin'
   window = new BrowserWindow({
     width: 1340,
     height: 880,
     minWidth: 840,
     minHeight: 600,
     title: 'Muse Desktop',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 20, y: 22 },
+    icon: iconPath,
+    ...(isMac
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 20, y: 22 },
+          vibrancy: 'sidebar' as const,
+          visualEffectState: 'active' as const,
+        }
+      : {
+          frame: false,
+          autoHideMenuBar: true,
+        }),
     backgroundColor:
       preferences.theme === 'muse'
         ? '#052467'
         : preferences.theme === 'moonlight'
           ? '#161a22'
           : '#f8f7f4',
-    vibrancy: 'sidebar',
-    visualEffectState: 'active',
     show: false,
     webPreferences: {
       preload: join(directory, '../preload/index.cjs'),
@@ -562,12 +634,16 @@ function setupMenu() {
           },
           { type: 'separator' },
           { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: action('settings') },
-          { type: 'separator' },
-          { role: 'services' },
-          { type: 'separator' },
-          { role: 'hide' },
-          { role: 'hideOthers' },
-          { role: 'unhide' },
+          ...(process.platform === 'darwin'
+            ? ([
+                { type: 'separator' },
+                { role: 'services' },
+                { type: 'separator' },
+                { role: 'hide' },
+                { role: 'hideOthers' },
+                { role: 'unhide' },
+              ] as const)
+            : []),
           { type: 'separator' },
           { role: 'quit' },
         ],
@@ -626,7 +702,12 @@ else {
   })
   app.on('activate', () => {
     if (window) window.show()
-    else createWindow()
+    else {
+      const iconPath = app.isPackaged
+        ? join(process.resourcesPath, 'app.asar/resources/icon.png')
+        : resolve(directory, '../../resources/icon.png')
+      createWindow(iconPath)
+    }
   })
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
@@ -680,7 +761,7 @@ else {
       setupIPC()
       initializeUpdates()
       setupMenu()
-      createWindow()
+      createWindow(iconPath)
       await muse.connect(preferences.cliPath)
     })
     .catch((error: unknown) => {
