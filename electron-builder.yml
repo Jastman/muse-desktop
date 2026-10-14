@@ -44,6 +44,7 @@ dmg:
       path: /Applications
 win:
   icon: resources/icon.png
+  artifactName: 'Muse-Desktop-${version}-win-${arch}.${ext}'
   target:
     - target: nsis
       arch: [x64, arm64]
@@ -52,6 +53,7 @@ win:
 linux:
   category: Development
   icon: resources/icon.png
+  artifactName: 'Muse-Desktop-${version}-linux-${arch}.${ext}'
   target:
     - target: AppImage
       arch: [x64, arm64]

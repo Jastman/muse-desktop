@@ -625,11 +625,11 @@ function setupMenu() {
             label: 'Check for Updates…',
             enabled: updateStatus().available,
             click: () => {
-              try {
-                checkForUpdates()
-              } catch (error) {
-                dialog.showErrorBox('Software updates', messageOf(error))
-              }
+              void Promise.resolve()
+                .then(() => checkForUpdates())
+                .catch((error: unknown) => {
+                  dialog.showErrorBox('Software updates', messageOf(error))
+                })
             },
           },
           { type: 'separator' },

@@ -291,7 +291,7 @@ export function Settings({
               <h3>Muse Desktop</h3>
               <span className="version-pill">Version {version}</span>
               <p>An unofficial, open-source companion for Muse Code by Robert Courson.</p>
-              <UpdateSettings onError={onError} />
+              <UpdateSettings platform={platform} onError={onError} />
               <div className="about-facts">
                 <span>
                   {platform === 'win32'
@@ -344,7 +344,13 @@ export function Settings({
   )
 }
 
-function UpdateSettings({ onError }: { onError: (message: string) => void }) {
+function UpdateSettings({
+  platform = 'darwin',
+  onError,
+}: {
+  platform?: string
+  onError: (message: string) => void
+}) {
   const [status, setStatus] = useState<UpdateStatus>()
   useEffect(() => {
     let active = true
@@ -376,7 +382,11 @@ function UpdateSettings({ onError }: { onError: (message: string) => void }) {
       <div className="setting-row">
         <div>
           <span className="setting-label">Software updates</span>
-          <small>Signed updates via Sparkle. You choose when to install.</small>
+          <small>
+            {platform === 'darwin'
+              ? 'Signed updates via Sparkle. You choose when to install.'
+              : 'Updates via GitHub Releases. You choose when to install.'}
+          </small>
         </div>
         <button
           className="button secondary"

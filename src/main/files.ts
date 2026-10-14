@@ -6,7 +6,7 @@ export async function resolveProjectPath(project: string, path: string) {
   const root = await realpath(project)
   const target = await realpath(resolve(root, path))
   const fromRoot = relative(root, target)
-  if (fromRoot === '..' || fromRoot.startsWith('../') || isAbsolute(fromRoot))
+  if (fromRoot === '..' || /^\.\.[/\\]/.test(fromRoot) || isAbsolute(fromRoot))
     throw new Error('This path is outside the selected project.')
   return { root, target }
 }

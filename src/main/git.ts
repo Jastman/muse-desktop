@@ -85,7 +85,7 @@ export async function containedFile(project: string, path: string) {
   const root = await realpath(project)
   const target = await realpath(resolve(root, path))
   const fromRoot = relative(root, target)
-  if (!fromRoot || fromRoot === '..' || fromRoot.startsWith('../') || isAbsolute(fromRoot)) {
+  if (!fromRoot || fromRoot === '..' || /^\.\.[/\\]/.test(fromRoot) || isAbsolute(fromRoot)) {
     throw new Error('The file is outside this project.')
   }
   return target
