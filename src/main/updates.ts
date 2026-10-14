@@ -56,25 +56,21 @@ export function selectReleaseAsset(
       typeof asset.browser_download_url === 'string' &&
       asset.browser_download_url.startsWith('https://github.com/robzilla1738/muse-desktop/'),
   )
-  const archToken = arch === 'arm64' ? 'arm64' : 'x64'
+  const archTokens = arch === 'arm64' ? ['arm64', 'aarch64'] : ['x64', 'x86_64']
+  const hasArch = (name: string) => archTokens.some((token) => name.includes(token))
   if (platform === 'win32') {
     return (
-      valid.find((a) => a.name.includes(archToken) && a.name.endsWith('.exe'))
-        ?.browser_download_url ||
+      valid.find((a) => hasArch(a.name) && a.name.endsWith('.exe'))?.browser_download_url ||
       valid.find((a) => a.name.endsWith('.exe'))?.browser_download_url ||
-      valid.find(
-        (a) => a.name.includes('win') && a.name.includes(archToken) && a.name.endsWith('.zip'),
-      )?.browser_download_url
+      valid.find((a) => a.name.includes('win') && hasArch(a.name) && a.name.endsWith('.zip'))
+        ?.browser_download_url
     )
   }
   if (platform === 'linux') {
     return (
-      valid.find((a) => a.name.includes(archToken) && a.name.endsWith('.AppImage'))
-        ?.browser_download_url ||
-      valid.find(
-        (a) =>
-          a.name.includes(archToken) && (a.name.endsWith('.tar.gz') || a.name.endsWith('.deb')),
-      )?.browser_download_url
+      valid.find((a) => hasArch(a.name) && a.name.endsWith('.AppImage'))?.browser_download_url ||
+      valid.find((a) => hasArch(a.name) && (a.name.endsWith('.tar.gz') || a.name.endsWith('.deb')))
+        ?.browser_download_url
     )
   }
   return undefined
