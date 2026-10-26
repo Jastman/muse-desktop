@@ -133,6 +133,14 @@ export class AttachmentStore {
     return { parts, display: [text, ...names.map((name) => `[Attached: ${name}]`)].join('\n') }
   }
 
+  /** Moves staged files to another draft, e.g. when a new conversation takes over its draft. */
+  rescope(ids: string[], from: string, to: string) {
+    for (const id of ids) {
+      const entry = this.staged.get(id)
+      if (entry?.scope === from) entry.scope = to
+    }
+  }
+
   release(ids: string[]) {
     for (const id of ids) this.staged.delete(id)
   }

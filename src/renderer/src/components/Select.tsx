@@ -1,6 +1,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 
+export type SelectOption = {
+  value: string
+  label: string
+  description?: string
+  disabled?: boolean
+}
+
 export function Select({
   label,
   value,
@@ -9,14 +16,17 @@ export function Select({
   disabled,
   icon,
   className = '',
+  note,
 }: {
   label: string
   value: string
-  options: { value: string; label: string }[]
+  options: SelectOption[]
   onChange: (value: string) => void
   disabled?: boolean
   icon?: ReactNode
   className?: string
+  /** Shown under the heading, e.g. to explain capability limits. */
+  note?: string
 }) {
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
@@ -43,7 +53,7 @@ export function Select({
     position()
   }
   const choose = (index: number) => {
-    if (options[index]) onChange(options[index].value)
+    if (options[index] && !options[index].disabled) onChange(options[index].value)
     popup.current?.hidePopover()
     trigger.current?.focus()
   }
@@ -142,13 +152,15 @@ export function Select({
         onToggle={(event) => setOpen(event.newState === 'open')}
       >
         <div className="select-heading">{label}</div>
+        {note && <div className="select-note">{note}</div>}
         {options.map((option, index) => (
           <div
             id={`${id}-${index}`}
             key={option.value}
             role="option"
             aria-selected={option.value === value}
-            className={`select-option ${index === active ? 'highlighted' : ''}`}
+            aria-disabled={option.disabled || undefined}
+            className={`select-option ${index === active ? 'highlighted' : ''} ${option.disabled ? 'disabled' : ''}`}
             onPointerMove={() => setActive(index)}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => choose(index)}
@@ -157,7 +169,10 @@ export function Select({
               size={15}
               style={{ visibility: option.value === value ? 'visible' : 'hidden' }}
             />
-            <span>{option.label}</span>
+            <span className="select-option-text">
+              <span>{option.label}</span>
+              {option.description && <small>{option.description}</small>}
+            </span>
           </div>
         ))}
       </div>

@@ -113,8 +113,15 @@ export const modelSchema = z.object({
   reasoningEffortVariants: z
     .array(z.object({ tier: z.string(), description: z.string().optional() }))
     .optional(),
+  /** Supported effort tiers, or 'unknown' when the provider does not report them (ADR 33400 D2). */
+  variants: z.union([z.array(z.string()), z.literal('unknown')]).optional(),
 })
 export type MuseModel = z.infer<typeof modelSchema>
+export const paneLimits = {
+  sidebar: { min: 200, max: 480, default: 268 },
+  inspector: { min: 300, max: 760, default: 400 },
+} as const
+
 export const effortSchema = z.enum([
   'none',
   'minimal',
@@ -139,11 +146,23 @@ const preferenceFields = {
   fontSize: z.enum(['compact', 'comfortable', 'large']),
   reduceMotion: z.boolean(),
   notifyOnCompletion: z.boolean(),
+  sidebarWidth: z.number().int().min(paneLimits.sidebar.min).max(paneLimits.sidebar.max),
+  inspectorWidth: z.number().int().min(paneLimits.inspector.min).max(paneLimits.inspector.max),
+  windowControls: z.enum(['native', 'custom']),
+  transcriptRendering: z.enum(['virtualized', 'full']),
+  announceUpdates: z.boolean(),
+  historyIndex: z.boolean(),
+  diagnostics: z.boolean(),
 }
 
+export const PREFERENCES_SCHEMA_VERSION = 2
+/** Defaults used before schema version 2; existing users keep their expressive look. */
+export const legacyPreferenceDefaults = { theme: 'muse', backgroundIntensity: 70 } as const
+
 export const preferencesSchema = z.object({
-  theme: preferenceFields.theme.default('muse'),
-  backgroundIntensity: preferenceFields.backgroundIntensity.default(70),
+  schemaVersion: z.literal(PREFERENCES_SCHEMA_VERSION).default(PREFERENCES_SCHEMA_VERSION),
+  theme: preferenceFields.theme.default('system'),
+  backgroundIntensity: preferenceFields.backgroundIntensity.default(20),
   cliPath: preferenceFields.cliPath.default(''),
   recentProjects: preferenceFields.recentProjects.default([]),
   trustedProjects: preferenceFields.trustedProjects.default([]),
@@ -153,6 +172,13 @@ export const preferencesSchema = z.object({
   fontSize: preferenceFields.fontSize.default('comfortable'),
   reduceMotion: preferenceFields.reduceMotion.default(false),
   notifyOnCompletion: preferenceFields.notifyOnCompletion.default(false),
+  sidebarWidth: preferenceFields.sidebarWidth.default(paneLimits.sidebar.default),
+  inspectorWidth: preferenceFields.inspectorWidth.default(paneLimits.inspector.default),
+  windowControls: preferenceFields.windowControls.default('native'),
+  transcriptRendering: preferenceFields.transcriptRendering.default('virtualized'),
+  announceUpdates: preferenceFields.announceUpdates.default(true),
+  historyIndex: preferenceFields.historyIndex.default(true),
+  diagnostics: preferenceFields.diagnostics.default(false),
 })
 // Updates must never apply defaults to omitted fields or grant project trust.
 export const preferencesPatchSchema = z
@@ -162,6 +188,14 @@ export const preferencesPatchSchema = z
   .strict()
 export type Preferences = z.infer<typeof preferencesSchema>
 export type Theme = Exclude<Preferences['theme'], 'system'>
+export type PreferencesRecovery = {
+  kind: 'malformed' | 'invalid-fields' | 'unreadable' | 'newer-version'
+  message: string
+  backupPath?: string
+  invalidFields?: string[]
+  canRestoreBackup: boolean
+}
+export type PreferencesRecoveryAction = 'retry' | 'reset' | 'restore-backup' | 'keep-recovered'
 
 export type SessionView = {
   session: MuseSession
@@ -171,7 +205,17 @@ export type SessionView = {
   usage?: { input: number; output: number; total: number }
   error?: string
   historyNotice?: string
+  /** turn/cancel was admitted; the turn is still running until turn/completed arrives. */
+  cancelRequested?: boolean
+  /** Follow-ups the CLI accepted with disposition `queued` and has not started yet. */
+  queuedTurns?: { turnId: string; displayText: string }[]
+  /** Terminal state reported by the most recent turn/completed. */
+  lastTurn?: { turnId?: string; terminal: string; durationMs?: number }
 }
+export type SendResult =
+  | { status: 'accepted'; disposition: string; turnId?: string }
+  | { status: 'rejected'; message: string }
+  | { status: 'uncertain'; message: string }
 export type ConnectionStatus = {
   state: 'connecting' | 'ready' | 'missing' | 'error'
   path?: string
@@ -196,12 +240,36 @@ export const attachmentLimits = {
   messageBytes: 4 * 1024 * 1024,
 } as const
 export type AttachmentInput = { name: string; data: Uint8Array }
+export const draftKeySchema = z
+  .string()
+  .max(4200)
+  .regex(/^(session:[\w.:-]{1,200}|new:[^\0]{0,4096})$/)
+export const storedDraftSchema = z.object({
+  key: draftKeySchema,
+  text: z.string().max(200000),
+  updatedAt: z.string(),
+  mode: z.enum(['queue', 'steer']).optional(),
+  /** Metadata only. Attachment bytes and staged IDs never persist; restored files must be reattached. */
+  attachments: z
+    .array(
+      z.object({
+        name: z.string().max(200),
+        kind: z.enum(['image', 'text']),
+        size: z.number().int().nonnegative(),
+      }),
+    )
+    .max(5),
+  /** Set just before a send. Seen after restart, the outcome is unknown and must not be retried automatically. */
+  sendState: z.enum(['sending']).optional(),
+})
+export type StoredDraft = z.infer<typeof storedDraftSchema>
+export type DraftInput = Omit<StoredDraft, 'key' | 'updatedAt'>
 export type ProjectFile = { name: string; path: string; directory: boolean }
 export type AppEvent =
   | { type: 'connection'; status: ConnectionStatus }
   | { type: 'session'; view: SessionView }
   | { type: 'sessions-changed' }
-  | { type: 'preferences'; preferences: Preferences }
+  | { type: 'preferences'; preferences: Preferences; recovery?: PreferencesRecovery }
   | { type: 'menu'; action: 'new' | 'open' | 'search' | 'settings' | 'sidebar' }
   | { type: 'error'; message: string }
 
@@ -218,6 +286,7 @@ export interface DesktopAPI {
   checkForUpdates(): Promise<UpdateStatus>
   setAutomaticUpdateChecks(enabled: boolean): Promise<UpdateStatus>
   bootstrap(): Promise<{
+    preferencesRecovery?: PreferencesRecovery
     preferences: Preferences
     status: ConnectionStatus
     version: string
@@ -228,6 +297,12 @@ export interface DesktopAPI {
   chooseCli(): Promise<string | null>
   chooseProject(): Promise<string | null>
   savePreferences(patch: Partial<Preferences>): Promise<Preferences>
+  recoverPreferences(
+    action: PreferencesRecoveryAction,
+  ): Promise<{ preferences: Preferences; recovery?: PreferencesRecovery }>
+  listDrafts(): Promise<{ drafts: StoredDraft[]; notice?: string }>
+  saveDraft(key: string, draft: DraftInput | null, immediate?: boolean): Promise<void>
+  clearDrafts(keys?: string[]): Promise<void>
   listSessions(cursor?: string): Promise<{ sessions: MuseSession[]; nextCursor: string | null }>
   createSession(project: string, modelId?: string): Promise<SessionView>
   openSession(sessionId: string, refresh?: boolean): Promise<SessionView>
@@ -238,7 +313,7 @@ export interface DesktopAPI {
     attachmentScope: string
     effort: ReasoningEffort
     mode: 'queue' | 'steer'
-  }): Promise<void>
+  }): Promise<SendResult>
   cancel(sessionId: string): Promise<void>
   compact(sessionId: string): Promise<{ status: string }>
   renameSession(sessionId: string, name: string): Promise<void>

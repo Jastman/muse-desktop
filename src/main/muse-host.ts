@@ -318,15 +318,41 @@ export class MuseHost {
     await this.resume(sessionId)
     const live = this.requireSession(sessionId)
     live.view.error = undefined
-    await this.connection.command(
-      'turn/start',
-      { sessionId, input, displayText, reasoningEffort: effort, ifBusy: mode },
-      { maxAttempts: 1 },
-    )
+    const connection = this.connection
+    let ack: unknown
+    try {
+      // maxAttempts 1: a send is never replayed automatically, even after a transport failure.
+      ack = await connection.command(
+        'turn/start',
+        { sessionId, input, displayText, reasoningEffort: effort, ifBusy: mode },
+        { maxAttempts: 1 },
+      )
+    } catch (error) {
+      if (error instanceof MspError) throw error
+      throw new SendOutcomeUnknownError(messageOf(error))
+    }
+    const result = z
+      .object({ disposition: z.string().optional(), turnId: z.string().optional() })
+      .passthrough()
+      .parse(ack ?? {})
+    if (result.disposition === 'queued' && result.turnId) {
+      live.view.queuedTurns = [
+        ...(live.view.queuedTurns ?? []).filter((turn) => turn.turnId !== result.turnId),
+        { turnId: result.turnId, displayText },
+      ]
+      this.schedule(sessionId)
+    }
+    return { disposition: result.disposition ?? 'started', turnId: result.turnId }
   }
 
   async cancel(sessionId: string) {
+    const live = this.requireSession(sessionId)
     await this.connection.command('turn/cancel', { sessionId }, { maxAttempts: 1 })
+    // Admission only: the turn has stopped when turn/completed arrives.
+    if (live.view.session.status === 'running') {
+      live.view.cancelRequested = true
+      this.schedule(sessionId)
+    }
   }
 
   async compact(sessionId: string) {
@@ -493,14 +519,24 @@ export class MuseHost {
         .parse(params)
       live.store.applyDelta(delta.itemId, delta.delta, delta.field)
     } else if (method === 'turn/started') {
-      live.view.session.activeTurnId = z.string().parse(params.turnId)
+      const turnId = z.string().parse(params.turnId)
+      live.view.session.activeTurnId = turnId
       live.view.session.status = 'running'
+      live.view.queuedTurns = live.view.queuedTurns?.filter((turn) => turn.turnId !== turnId)
+    } else if (method === 'turn/unqueued') {
+      live.view.queuedTurns = live.view.queuedTurns?.filter((turn) => turn.turnId !== params.turnId)
     } else if (method === 'turn/completed') {
       live.view.session.activeTurnId = null
       live.view.session.status = 'idle'
       live.view.session.updatedAt = new Date().toISOString()
       const error = z.object({ message: z.string() }).optional().parse(params.error)
       live.view.error = error?.message
+      live.view.cancelRequested = false
+      live.view.lastTurn = {
+        turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
+        terminal: typeof params.terminal === 'string' ? params.terminal : 'completed',
+        durationMs: typeof params.durationMs === 'number' ? params.durationMs : undefined,
+      }
       this.emit({ type: 'sessions-changed' })
     } else if (method === 'session/statusChanged') {
       live.view.session.status = z.string().parse(params.status)
@@ -576,6 +612,15 @@ export class MuseHost {
     this.sessions.clear()
     if (this.host) await this.host.close()
     this.host = undefined
+  }
+}
+
+/** The request may have reached the CLI before the transport failed; never resend automatically. */
+export class SendOutcomeUnknownError extends Error {
+  constructor(cause: string) {
+    super(
+      `Muse may have received this message before the connection failed (${cause}). Check the conversation before sending it again.`,
+    )
   }
 }
 

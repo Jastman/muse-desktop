@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { listProjectFiles, readProjectFile } from '../../src/main/files'
 import { parseGitStatus } from '../../src/main/git'
-import { readPreferences, writePreferences } from '../../src/main/preferences'
+import { loadPreferences, writePreferences } from '../../src/main/preferences'
 import { projectName } from '../../src/renderer/src/components/Primitives'
 import { preferencesPatchSchema, preferencesSchema } from '../../src/shared/protocol'
 
@@ -74,7 +74,7 @@ describe('local preferences', () => {
       reduceMotion: true,
     })
     for (const [key, value] of Object.entries(current)) {
-      if (key === 'trustedProjects' || key === 'recentProjects') continue
+      if (['trustedProjects', 'recentProjects', 'schemaVersion'].includes(key)) continue
       expect(preferencesPatchSchema.parse({ [key]: value })).toEqual({ [key]: value })
     }
     const patch = preferencesPatchSchema.parse({ reasoningEffort: 'low' })
@@ -86,18 +86,20 @@ describe('local preferences', () => {
     expect(() => preferencesPatchSchema.parse({ trustedProjects: ['/tmp'] })).toThrow()
     expect(() => preferencesPatchSchema.parse({ recentProjects: ['/tmp'] })).toThrow()
   })
-  it('defaults to Muse and atomically saves independent settings', async () => {
+  it('defaults new installs to the quiet system theme and atomically saves settings', async () => {
     const path = join(temporary, 'desktop/preferences.json')
-    expect((await readPreferences(path)).theme).toBe('muse')
+    expect((await loadPreferences(path)).preferences.theme).toBe('system')
     const preferences = preferencesSchema.parse({ theme: 'grove', backgroundIntensity: 35 })
     await writePreferences(path, preferences)
-    expect(await readPreferences(path)).toEqual(preferences)
+    expect((await loadPreferences(path)).preferences).toEqual(preferences)
     expect(JSON.parse(await readFile(path, 'utf8')).theme).toBe('grove')
   })
   it('reports malformed preferences instead of overwriting them', async () => {
     const path = join(temporary, 'preferences.json')
     await writeFile(path, '{broken')
-    await expect(readPreferences(path)).rejects.toThrow('could not read')
+    const state = await loadPreferences(path)
+    expect(state.recovery?.kind).toBe('malformed')
+    expect(state.writable).toBe(false)
     expect(await readFile(path, 'utf8')).toBe('{broken')
   })
 })

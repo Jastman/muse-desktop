@@ -17,22 +17,50 @@ import {
   type Preferences,
   type ProjectFile,
   type ReasoningEffort,
+  type StoredDraft,
 } from '../../../shared/protocol'
+import { effortCapability } from '../capabilities'
 import { IconButton } from './Primitives'
 import { Select } from './Select'
 import { VoiceInput } from './VoiceInput'
 import { composerCommands, parseComposerCommand } from '../commands'
 
-const efforts: ReasoningEffort[] = [
-  'none',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-  'ultra',
+export type SendState = {
+  key: string
+  phase: 'sending' | 'accepted' | 'rejected' | 'uncertain'
+  disposition?: string
+  message?: string
+}
+
+const followUpOptions = [
+  {
+    value: 'queue',
+    label: 'Queue next',
+    description: 'Waits, then runs as a new turn after Muse finishes the current one.',
+  },
+  {
+    value: 'steer',
+    label: 'Steer now',
+    description: 'Adds your message to the current turn so Muse can change course.',
+  },
 ]
+
+export function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`
+  return `${Math.round(size / 104857.6) / 10} MB`
+}
+
+function sendStatusText(state: SendState | undefined, running: boolean) {
+  if (!state) return ''
+  if (state.phase === 'sending') return 'Sending…'
+  if (state.phase === 'rejected') return 'Not sent. Your draft was restored.'
+  if (state.phase === 'uncertain') return ''
+  if (state.disposition === 'queued')
+    return 'Queued. Muse will start it after the current turn finishes.'
+  if (state.disposition === 'steered') return 'Delivered to the running turn.'
+  return running ? 'Accepted. Muse is working.' : 'Accepted.'
+}
 
 export function Composer({
   draft,
@@ -51,6 +79,13 @@ export function Composer({
   draftKey,
   attachments,
   onAttachments,
+  onVoiceText,
+  staleAttachments = [],
+  onDismissStale = () => {},
+  uncertainSend = false,
+  onDismissUncertain = () => {},
+  sendState,
+  cancelRequested = false,
   onSubmit,
   onCancel,
   onError,
@@ -71,6 +106,13 @@ export function Composer({
   draftKey: string
   attachments: Attachment[]
   onAttachments: (key: string, update: (current: Attachment[]) => Attachment[]) => void
+  onVoiceText: (key: string, text: string) => void
+  staleAttachments?: StoredDraft['attachments']
+  onDismissStale?: (index?: number) => void
+  uncertainSend?: boolean
+  onDismissUncertain?: () => void
+  sendState?: SendState
+  cancelRequested?: boolean
   onSubmit: (attachments: Attachment[], mode: 'queue' | 'steer') => Promise<boolean>
   onCancel: () => void
   onError: (message: string) => void
@@ -80,6 +122,27 @@ export function Composer({
   const [mentionIndex, setMentionIndex] = useState(0)
   const [mentionFiles, setMentionFiles] = useState<ProjectFile[]>([])
   const [dragging, setDragging] = useState(false)
+  // Object URLs for image thumbnails of files the renderer already holds (drop/paste).
+  const thumbnails = useRef(new Map<string, string>())
+  const [, setThumbnailVersion] = useState(0)
+  useEffect(() => {
+    const live = new Set(attachments.map((file) => file.id))
+    for (const [id, url] of thumbnails.current)
+      if (!live.has(id)) {
+        URL.revokeObjectURL(url)
+        thumbnails.current.delete(id)
+      }
+  }, [attachments])
+  useEffect(() => {
+    const urls = thumbnails.current
+    return () => {
+      for (const url of urls.values()) URL.revokeObjectURL(url)
+      urls.clear()
+    }
+  }, [])
+  const currentModel = models.find((model) => model.modelId === modelId)
+  const effort = effortCapability(currentModel, preferences.reasoningEffort)
+  const statusText = sendStatusText(sendState, running)
   const suggestions = /^\/[a-z-]*$/i.test(draft)
     ? composerCommands.filter((command) => command.name.startsWith(draft.slice(1).toLowerCase()))
     : []
@@ -135,8 +198,6 @@ export function Composer({
     setCommandIndex(0)
     setMentionIndex(0)
   }, [draft])
-  const latestDraft = useRef(draft)
-  latestDraft.current = draft
   const [mode, setMode] = useState<'queue' | 'steer'>('queue')
   const textarea = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
@@ -175,6 +236,12 @@ export function Composer({
         }),
       )
       const added = await window.muse.stageAttachments(key, inputs)
+      added.forEach((attachment, index) => {
+        const file = files[index]
+        if (attachment.kind === 'image' && file?.type.startsWith('image/'))
+          thumbnails.current.set(attachment.id, URL.createObjectURL(file))
+      })
+      setThumbnailVersion((version) => version + 1)
       onAttachments(key, (current) => [...current, ...added])
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error))
@@ -243,10 +310,18 @@ export function Composer({
           <div className="running-line">
             <span className="working-orb" />
             <span>
-              {backgroundOnly ? 'Finishing background tasks' : 'Muse is working'}
+              {cancelRequested
+                ? 'Stopping — waiting for Muse to confirm'
+                : backgroundOnly
+                  ? 'Finishing background tasks'
+                  : 'Muse is working'}
               <span className="animated-dots">…</span>
             </span>
-            <span className="running-hint">Send a follow-up to queue or steer.</span>
+            <span className="running-hint">
+              {cancelRequested
+                ? 'The stop request was accepted. Work may continue briefly.'
+                : 'Send a follow-up to queue it or steer this turn.'}
+            </span>
           </div>
         </div>
       </div>
@@ -270,12 +345,58 @@ export function Composer({
           void submit()
         }}
       >
-        {attachments.length > 0 && (
-          <div className="attachment-list">
-            {attachments.map((file) => (
-              <span className="attachment" key={file.id}>
+        {uncertainSend && (
+          <div className="composer-notice warning" role="status">
+            <span>
+              {sendState?.phase === 'uncertain' && sendState.message
+                ? sendState.message
+                : 'This message may already have been sent before Muse Desktop closed or lost its connection. Check the conversation before sending it again.'}
+            </span>
+            <button type="button" onClick={onDismissUncertain}>
+              Dismiss
+            </button>
+          </div>
+        )}
+        {staleAttachments.length > 0 && (
+          <div className="attachment-list" aria-label="Attachments to reattach">
+            {staleAttachments.map((file, index) => (
+              <span className="attachment stale" key={`${file.name}-${index}`}>
                 {file.kind === 'image' ? <Image size={14} /> : <FileText size={14} />}
                 <span>{file.name}</span>
+                <small>{formatBytes(file.size)} · not attached — add it again to include it</small>
+                <button
+                  type="button"
+                  aria-label={`Dismiss ${file.name}`}
+                  onClick={() => onDismissStale(index)}
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        {attachments.length > 0 && (
+          <div className="attachment-list" aria-label="Attached files">
+            {attachments.map((file) => (
+              <span className="attachment" key={file.id}>
+                {thumbnails.current.get(file.id) ? (
+                  <img
+                    className="attachment-thumbnail"
+                    src={thumbnails.current.get(file.id)}
+                    alt=""
+                    width={28}
+                    height={28}
+                  />
+                ) : file.kind === 'image' ? (
+                  <Image size={14} />
+                ) : (
+                  <FileText size={14} />
+                )}
+                <span>{file.name}</span>
+                <small>
+                  {formatBytes(file.size)} · {file.kind === 'image' ? 'image' : 'text'} · included
+                  when sent
+                </small>
                 <button
                   type="button"
                   aria-label={`Remove ${file.name}`}
@@ -390,9 +511,9 @@ export function Composer({
               disabled={submitting || !connected}
               onBusy={setVoiceBusy}
               onError={onError}
-              onText={(text) => {
-                const existing = latestDraft.current
-                setDraft(`${existing}${existing && !/\s$/.test(existing) ? ' ' : ''}${text}`)
+              scope={draftKey}
+              onText={(text, scope) => {
+                onVoiceText(scope, text)
                 textarea.current?.focus()
               }}
             />
@@ -415,15 +536,12 @@ export function Composer({
             />
             <Select
               label="Reasoning effort"
-              className="effort-select"
+              className={`effort-select ${effort.warning ? 'has-warning' : ''}`}
               value={preferences.reasoningEffort}
               onChange={(value) => onEffort(value as ReasoningEffort)}
               icon={<AudioLines size={15} className="effort-icon" />}
-              options={efforts.map((effort) => ({
-                value: effort,
-                label:
-                  effort === 'xhigh' ? 'Extra high' : effort[0].toUpperCase() + effort.slice(1),
-              }))}
+              note={effort.note}
+              options={effort.options}
             />
           </div>
           <div className="composer-actions">
@@ -433,10 +551,8 @@ export function Composer({
                   label="Follow-up behavior"
                   value={mode}
                   onChange={(value) => setMode(value as 'queue' | 'steer')}
-                  options={[
-                    { value: 'queue', label: 'Queue next' },
-                    { value: 'steer', label: 'Steer now' },
-                  ]}
+                  note="Muse is still working on the current turn."
+                  options={followUpOptions}
                 />
                 <IconButton label="Stop Muse" onClick={onCancel}>
                   <Square size={14} fill="currentColor" />
@@ -459,7 +575,16 @@ export function Composer({
           </div>
         </div>
       </form>
+      {effort.warning && (
+        <p className="composer-warning" role="status">
+          {effort.warning}
+        </p>
+      )}
       <div className="composer-footnote">
+        <span className="send-status" role="status" aria-live="polite">
+          {statusText}
+          {sendState?.phase === 'rejected' && sendState.message ? ` ${sendState.message}` : ''}
+        </span>
         <span>{hasProject ? '' : 'Select a project when you send your first message.'}</span>
         <span className="composer-shortcuts">
           <span className="composer-shortcut">

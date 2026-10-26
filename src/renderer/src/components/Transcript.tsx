@@ -24,7 +24,8 @@ import type {
   TranscriptItem,
   UserQuestion,
 } from '../../../shared/protocol'
-import { IconButton, MuseMark, cleanMessageText } from './Primitives'
+import { IconButton, MuseMark } from './Primitives'
+import { userMessageText } from '../message-text'
 
 function extractText(node: ReactNode): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
@@ -568,11 +569,7 @@ export function Transcript({
             const list = entry.type === 'toolGroup' ? entry.items : [entry.item]
             return list.map((item) => {
               if (item.kind === 'userMessage') {
-                const userText =
-                  cleanMessageText(item.displayText || item.text) ||
-                  item.displayText ||
-                  item.text ||
-                  ''
+                const userText = userMessageText(item)
                 return (
                   <article key={item.itemId} className="message user-message">
                     <div className="message-heading">

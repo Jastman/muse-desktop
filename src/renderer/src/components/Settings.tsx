@@ -12,6 +12,7 @@ import {
   Smile,
   RefreshCw,
   Sun,
+  ShieldCheck,
   Terminal,
 } from 'lucide-react'
 import type { ConnectionStatus, Preferences, Theme, UpdateStatus } from '../../../shared/protocol'
@@ -34,6 +35,7 @@ export function Settings({
   onClose,
   onError,
   onReconnect,
+  onClearDrafts,
   initialTab,
 }: {
   preferences: Preferences
@@ -44,9 +46,11 @@ export function Settings({
   onClose: () => void
   onError: (message: string) => void
   onReconnect: () => void
+  onClearDrafts: () => Promise<void>
   initialTab: 'appearance' | 'connection'
 }) {
-  const [tab, setTab] = useState<'appearance' | 'connection' | 'about'>(initialTab)
+  const [tab, setTab] = useState<'appearance' | 'connection' | 'data' | 'about'>(initialTab)
+  const [confirmClearDrafts, setConfirmClearDrafts] = useState(false)
   const [cliPath, setCliPath] = useState(preferences.cliPath)
   return (
     <Dialog title="Settings" onClose={onClose} className="settings-dialog">
@@ -65,6 +69,10 @@ export function Settings({
           >
             <Terminal size={16} />
             Muse Code
+          </button>
+          <button className={tab === 'data' ? 'selected' : ''} onClick={() => setTab('data')}>
+            <ShieldCheck size={16} />
+            Privacy & data
           </button>
           <button className={tab === 'about' ? 'selected' : ''} onClick={() => setTab('about')}>
             <MuseMark size={16} />
@@ -284,6 +292,40 @@ export function Settings({
                 </button>
               </div>
             </>
+          )}
+          {tab === 'data' && (
+            <div className="data-settings">
+              <section className="settings-group" aria-labelledby="drafts-heading">
+                <h3 id="drafts-heading">Saved drafts</h3>
+                <p>
+                  Unsent composer text is saved on this device so it survives restarts. Muse Desktop
+                  keeps at most 200 drafts for up to 30 days. Attached files are not stored; only
+                  their names and sizes are kept so you can attach them again.
+                </p>
+                {confirmClearDrafts ? (
+                  <div className="settings-inline-actions">
+                    <span>Delete every unsent draft? This cannot be undone.</span>
+                    <button
+                      className="button secondary"
+                      onClick={() => {
+                        void onClearDrafts()
+                          .catch((error: Error) => onError(error.message))
+                          .finally(() => setConfirmClearDrafts(false))
+                      }}
+                    >
+                      Delete drafts
+                    </button>
+                    <button className="text-button" onClick={() => setConfirmClearDrafts(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button className="button secondary" onClick={() => setConfirmClearDrafts(true)}>
+                    Clear saved drafts…
+                  </button>
+                )}
+              </section>
+            </div>
           )}
           {tab === 'about' && (
             <div className="about-settings">

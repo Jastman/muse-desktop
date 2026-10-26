@@ -39,10 +39,13 @@ import {
   type MuseModel,
   type MuseSession,
   type Preferences,
+  type PreferencesRecovery,
   type SessionView,
   type Theme,
 } from '../../shared/protocol'
-import { Composer } from './components/Composer'
+import { Composer, type SendState } from './components/Composer'
+import { PreferencesRecoveryBanner } from './components/RecoveryBanner'
+import { newDraftKey, sessionDraftKey, useDrafts } from './controllers/drafts'
 import { CommandMenu } from './components/CommandMenu'
 import { Inspector } from './components/Inspector'
 import {
@@ -94,8 +97,6 @@ function conversationGroup(session: MuseSession, pinned: string[]) {
   return date >= week ? 'Previous 7 days' : 'Earlier'
 }
 
-const noAttachments: Attachment[] = []
-
 export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => preferencesSchema.parse({}))
   const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting' })
@@ -109,9 +110,9 @@ export function App() {
   const [view, setView] = useState<SessionView | null>(null)
   const [models, setModels] = useState<MuseModel[]>([])
   const [modelId, setModelId] = useState('')
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, Attachment[]>>({})
   const [submitting, setSubmitting] = useState(false)
+  const [sendState, setSendState] = useState<SendState>()
+  const [preferencesRecovery, setPreferencesRecovery] = useState<PreferencesRecovery>()
   const [loadingSession, setLoadingSession] = useState(false)
   const [sidebar, setSidebar] = useState(true)
   const [inspector, setInspector] = useState(false)
@@ -141,11 +142,19 @@ export function App() {
     preferences.theme === 'system' ? (darkSystem ? 'moonlight' : 'daylight') : preferences.theme
   const modKey = platform === 'darwin' ? '⌘' : 'Ctrl'
   const altKey = platform === 'darwin' ? '⌥' : 'Alt+'
-  const draftKey = view?.session.sessionId || `new:${project}`
-  const draft = drafts[draftKey] || ''
   const running = view?.session.status === 'running'
 
   const showError = useCallback((message: string) => setToast({ message, kind: 'error' }), [])
+  const drafts = useDrafts(showError)
+  const draftKey = view ? sessionDraftKey(view.session.sessionId) : newDraftKey(project)
+  const draft = drafts.text(draftKey)
+  const appendLine = (line: string) => {
+    const existing = drafts.text(draftKey)
+    drafts.setText(
+      draftKey,
+      `${existing}${existing && !existing.endsWith('\n') ? '\n' : ''}${line}\n`,
+    )
+  }
   const showSuccess = (message: string) => setToast({ message, kind: 'success' })
   const refreshSessions = useCallback(async () => {
     const sequence = ++historySequence.current
@@ -196,6 +205,20 @@ export function App() {
     document.documentElement.dataset.reduceMotion = String(preferences.reduceMotion)
   }, [theme, preferences.fontSize, preferences.reduceMotion])
   useEffect(() => {
+    if (sendState?.phase !== 'accepted') return
+    const timer = setTimeout(
+      () => setSendState((current) => (current === sendState ? undefined : current)),
+      6000,
+    )
+    return () => clearTimeout(timer)
+  }, [sendState])
+  useEffect(() => {
+    if (drafts.notice) {
+      showError(drafts.notice)
+      drafts.dismissNotice()
+    }
+  }, [drafts, showError])
+  useEffect(() => {
     if (!toast || toast.kind === 'error') return
     const timer = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(timer)
@@ -203,7 +226,10 @@ export function App() {
   useEffect(() => {
     const receive = (event: AppEvent) => {
       if (event.type === 'connection') setStatus(event.status)
-      if (event.type === 'preferences') setPreferences(event.preferences)
+      if (event.type === 'preferences') {
+        setPreferences(event.preferences)
+        setPreferencesRecovery(event.recovery)
+      }
       if (event.type === 'error') showError(event.message)
       if (event.type === 'menu') menuHandler.current(event.action)
       if (event.type === 'session') {
@@ -226,6 +252,7 @@ export function App() {
       .bootstrap()
       .then((data) => {
         setPreferences(data.preferences)
+        setPreferencesRecovery(data.preferencesRecovery)
         setStatus(data.status)
         setVersion(data.version)
         setPlatform(data.platform || 'darwin')
@@ -402,7 +429,7 @@ export function App() {
             }
           }
         }
-        setDrafts((values) => ({ ...values, [key]: '' }))
+        drafts.setText(key, '')
         return true
       }
       let current = view
@@ -417,8 +444,12 @@ export function App() {
         if (openSequence.current === sequence) activeId.current = current.session.sessionId
       }
       const submittedSessionId = current.session.sessionId
+      // A new conversation's draft moves to the conversation it created.
+      const target = sessionDraftKey(submittedSessionId)
+      if (target !== key) drafts.setText(key, '')
+      const optimisticId = `optimistic-${Date.now()}`
       const optimisticItem = {
-        itemId: `optimistic-${Date.now()}`,
+        itemId: optimisticId,
         kind: 'userMessage',
         revision: 0,
         status: 'completed',
@@ -426,45 +457,50 @@ export function App() {
         displayText: text,
         recordedAt: new Date().toISOString(),
       }
+      setSendState({ key: target, phase: 'sending' })
+      await drafts.markSending(target, text, attachments)
+      if (target !== key) drafts.updateAttachments(key, () => [])
       if (openSequence.current === sequence) {
         setView((existing) => {
           const base = existing?.session.sessionId === submittedSessionId ? existing : current!
-          const alreadyHasUserMessage = base.items.some(
+          const echoed = base.items.some(
             (item) =>
-              item.kind === 'userMessage' && (item.text === text || item.displayText === text),
+              item.kind === 'userMessage' &&
+              item.revision > 0 &&
+              (item.displayText === text || item.text === text) &&
+              Date.parse(item.recordedAt || '') >= Date.parse(optimisticItem.recordedAt) - 1000,
           )
-          return {
-            ...base,
-            session: { ...base.session, status: 'running' },
-            items: alreadyHasUserMessage ? base.items : [...base.items, optimisticItem],
-          }
+          return echoed ? base : { ...base, items: [...base.items, optimisticItem] }
         })
       }
-      setDrafts((values) => ({
-        ...values,
-        [key]: values[key] === text ? '' : values[key] || '',
-        [submittedSessionId]:
-          values[submittedSessionId] === text ? '' : values[submittedSessionId] || '',
-      }))
-      await window.muse.send({
-        sessionId: current.session.sessionId,
+      const result = await window.muse.send({
+        sessionId: submittedSessionId,
         text,
         attachments: attachments.map((file) => file.id),
         attachmentScope: key,
         effort: preferences.reasoningEffort,
         mode,
       })
-      if (attachments.length) {
-        const sent = new Set(attachments.map((file) => file.id))
-        setAttachmentDrafts((values) => ({
-          ...values,
-          [key]: (values[key] || []).filter((file) => !sent.has(file.id)),
-        }))
+      if (result.status !== 'accepted') {
+        // Roll back only the optimistic echo; authoritative items from the CLI are untouched.
+        setView((existing) =>
+          existing?.session.sessionId === submittedSessionId
+            ? { ...existing, items: existing.items.filter((item) => item.itemId !== optimisticId) }
+            : existing,
+        )
+        await drafts.settle(target, result.status, text, attachments)
+        setSendState({ key: target, phase: result.status, message: result.message })
+        if (result.status === 'rejected') showError(`${result.message} Your draft was restored.`)
+        return false
       }
+      await drafts.settle(target, 'accepted', text, attachments)
+      setSendState({ key: target, phase: 'accepted', disposition: result.disposition })
       return true
     } catch (error) {
-      setDrafts((values) => ({ ...values, [key]: values[key] || text }))
-      showError(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      drafts.setText(key, drafts.text(key) || text)
+      setSendState({ key, phase: 'rejected', message })
+      showError(message)
       return false
     } finally {
       setSubmitting(false)
@@ -523,6 +559,21 @@ export function App() {
       className={`app-shell ${sidebar ? '' : 'sidebar-hidden'} ${inspector ? 'with-inspector' : ''}`}
       style={{ '--background-presence': preferences.backgroundIntensity / 100 } as CSSProperties}
     >
+      {preferencesRecovery && (
+        <PreferencesRecoveryBanner
+          recovery={preferencesRecovery}
+          onAction={async (action) => {
+            try {
+              const result = await window.muse.recoverPreferences(action)
+              setPreferences(result.preferences)
+              setPreferencesRecovery(result.recovery)
+              if (!result.recovery) showSuccess('Preferences saved.')
+            } catch (error) {
+              showError(error instanceof Error ? error.message : String(error))
+            }
+          }}
+        />
+      )}
       {platform !== 'darwin' && (
         <div className="window-traffic-lights" role="group" aria-label="Window controls">
           <button
@@ -985,10 +1036,7 @@ export function App() {
             }}
             onMention={(path) => {
               setPage('chat')
-              setDrafts((current) => ({
-                ...current,
-                [draftKey]: `${current[draftKey] || ''}${current[draftKey] ? '\n' : ''}Please look at the project file: ${JSON.stringify(path)}\n`,
-              }))
+              appendLine(`Please look at the project file: ${JSON.stringify(path)}`)
             }}
           />
         )}
@@ -1044,7 +1092,7 @@ export function App() {
                         className="starter-card"
                         key={starter.title}
                         onClick={() => {
-                          setDrafts((current) => ({ ...current, [draftKey]: starter.prompt }))
+                          drafts.setText(draftKey, starter.prompt)
                           document.querySelector<HTMLTextAreaElement>('textarea')?.focus()
                         }}
                       >
@@ -1064,7 +1112,7 @@ export function App() {
               <div className={`composer-dock ${view ? 'conversation-dock' : ''}`}>
                 <Composer
                   draft={draft}
-                  setDraft={(value) => setDrafts((current) => ({ ...current, [draftKey]: value }))}
+                  setDraft={(value) => drafts.setText(draftKey, value)}
                   running={Boolean(running)}
                   backgroundOnly={Boolean(view && isBackgroundOnly(view.items))}
                   submitting={submitting}
@@ -1077,13 +1125,21 @@ export function App() {
                   onModel={setModel}
                   onEffort={(reasoningEffort) => savePreferences({ reasoningEffort })}
                   draftKey={draftKey}
-                  attachments={attachmentDrafts[draftKey] || noAttachments}
-                  onAttachments={(key, update) =>
-                    setAttachmentDrafts((current) => ({
-                      ...current,
-                      [key]: update(current[key] || []),
-                    }))
-                  }
+                  attachments={drafts.attachments(draftKey)}
+                  staleAttachments={drafts.stale(draftKey)}
+                  onDismissStale={(index) => drafts.dismissStale(draftKey, index)}
+                  uncertainSend={drafts.uncertain(draftKey)}
+                  onDismissUncertain={() => drafts.dismissUncertain(draftKey)}
+                  sendState={sendState?.key === draftKey ? sendState : undefined}
+                  cancelRequested={Boolean(view?.cancelRequested)}
+                  onAttachments={drafts.updateAttachments}
+                  onVoiceText={(key, text) => {
+                    drafts.appendText(key, text)
+                    if (key !== draftKey)
+                      showSuccess(
+                        'Your transcription was added to the draft where recording started.',
+                      )
+                  }}
                   onSubmit={submit}
                   onCancel={() => {
                     if (view)
@@ -1107,10 +1163,7 @@ export function App() {
         onClose={() => setInspector(false)}
         onMentionDiff={(path) => {
           setPage('chat')
-          setDrafts((current) => ({
-            ...current,
-            [draftKey]: `${current[draftKey] || ''}${current[draftKey] ? '\n' : ''}Please review the changes in @${path}\n`,
-          }))
+          appendLine(`Please review the changes in @${path}`)
         }}
         onError={showError}
       />
@@ -1125,6 +1178,10 @@ export function App() {
           onClose={() => setSettings(false)}
           onError={showError}
           onReconnect={reconnect}
+          onClearDrafts={async () => {
+            await drafts.clearAll()
+            showSuccess('Saved drafts deleted.')
+          }}
         />
       )}
       {commands && (
