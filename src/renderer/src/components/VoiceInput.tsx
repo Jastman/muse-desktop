@@ -7,12 +7,15 @@ type Phase = 'idle' | 'permission' | 'recording' | 'transcribing'
 
 export function VoiceInput({
   disabled,
+  scope,
   onText,
   onError,
   onBusy,
 }: {
   disabled: boolean
-  onText: (text: string) => void
+  /** Draft that receives the transcript; captured when recording starts so switching cannot misroute it. */
+  scope: string
+  onText: (text: string, scope: string) => void
   onError: (message: string) => void
   onBusy: (busy: boolean) => void
 }) {
@@ -29,6 +32,8 @@ export function VoiceInput({
   const callbacks = useRef({ onText, onError, onBusy })
   callbacks.current = { onText, onError, onBusy }
   const busy = useRef(false)
+  const currentScope = useRef(scope)
+  currentScope.current = scope
 
   const release = () => {
     clearInterval(capture.current.timer)
@@ -73,6 +78,7 @@ export function VoiceInput({
     callbacks.current.onBusy(true)
     setPhase('permission')
     const generation = ++capture.current.generation
+    const targetScope = currentScope.current
     try {
       await window.muse.requestMicrophone()
       if (generation !== capture.current.generation) return
@@ -114,7 +120,8 @@ export function VoiceInput({
             const text = await window.muse.transcribeVoice(
               encodeVoiceWav(channels, audio.sampleRate),
             )
-            if (generation === capture.current.generation) callbacks.current.onText(text)
+            if (generation === capture.current.generation)
+              callbacks.current.onText(text, targetScope)
           } catch (error) {
             if (generation === capture.current.generation)
               callbacks.current.onError(
@@ -235,7 +242,7 @@ export function VoiceInput({
         )}
       </IconButton>
       {phase !== 'idle' && (
-        <div className="voice-status" role="status">
+        <div className="voice-status" role="status" aria-label="Voice input">
           {phase === 'recording' && (
             <span className="voice-waveform" aria-hidden="true">
               {levels.map((level, index) => (

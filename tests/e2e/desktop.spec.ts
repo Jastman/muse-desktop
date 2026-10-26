@@ -68,6 +68,9 @@ test.beforeAll(async () => {
       preferencesSchema.parse({
         trustedProjects: [project],
         cliPath: binary,
+        // Screenshots document the illustrated Muse theme; new installs default to the quiet theme.
+        theme: 'muse',
+        backgroundIntensity: 70,
       }),
     ),
   )
@@ -128,9 +131,20 @@ test('theme menus support keyboard selection, escape, outside clicks and saved p
   const effort = page.getByRole('combobox', { name: 'Reasoning effort' })
   await effort.click()
   await expect(page.getByRole('listbox', { name: 'Reasoning effort' })).toBeVisible()
+  // Unsupported efforts for the current model are disabled and skipped by the keyboard.
   await effort.press('Home')
-  await effort.press('ArrowDown')
-  await effort.press('ArrowDown')
+  for (let step = 0; step < 8; step++) {
+    if (
+      (
+        await page
+          .getByRole('listbox', { name: 'Reasoning effort' })
+          .locator('.select-option.highlighted')
+          .textContent()
+      )?.startsWith('Low')
+    )
+      break
+    await effort.press('ArrowDown')
+  }
   await effort.press('Enter')
   await expect(effort).toContainText('Low')
   expect((await page.evaluate(() => window.muse.bootstrap())).preferences.reasoningEffort).toBe(
@@ -160,11 +174,19 @@ test('thinking level and every preference stay independent across themes and rel
     }),
   )
   const effort = page.getByRole('combobox', { name: 'Reasoning effort' })
+  let lastChosen = ''
   for (const theme of ['Plush', 'Grove', 'Moonlight', 'Daylight', 'Muse']) {
     await page.getByRole('button', { name: `${theme} theme`, exact: true }).click()
     for (const label of ['Low', 'Medium', 'High', 'Extra high']) {
       await effort.click()
-      await page.getByRole('option', { name: label, exact: true }).click()
+      const option = page.getByRole('option', { name: new RegExp(`^${label}`) })
+      // Efforts the current model does not advertise are hidden or disabled and cannot be chosen.
+      if (!(await option.count()) || (await option.getAttribute('aria-disabled')) === 'true') {
+        await effort.press('Escape')
+        continue
+      }
+      await option.click()
+      lastChosen = label
       await expect(effort).toContainText(label)
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme.toLowerCase())
       const { preferences } = await page.evaluate(() => window.muse.bootstrap())
@@ -183,9 +205,9 @@ test('thinking level and every preference stay independent across themes and rel
   }
   await page.reload()
   await expect(page.locator('html')).toHaveAttribute('data-text-size', 'large')
-  await expect(effort).toContainText('Extra high')
+  await expect(effort).toContainText(lastChosen)
   await page.evaluate(
-    ({ recentProjects: _recent, trustedProjects: _trusted, ...patch }) =>
+    ({ recentProjects: _recent, trustedProjects: _trusted, schemaVersion: _version, ...patch }) =>
       window.muse.savePreferences(patch),
     original,
   )
@@ -244,14 +266,14 @@ test('voice records a clip, inserts a reviewed draft, and cancels without sendin
   await composer.fill('Existing draft.')
   await page.keyboard.press('Alt+v')
   await expect(page.getByRole('button', { name: 'Stop recording (⌥V)', exact: true })).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('0:01')
+  await expect(page.getByRole('status', { name: 'Voice input' })).toContainText('0:01')
   await page.keyboard.press('Alt+v')
   await expect(composer).toHaveValue('Existing draft. A voice draft to review.')
   await expect(page.locator('.user-message-text')).toHaveCount(0)
   await page.getByRole('button', { name: 'Voice input (⌥V)', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Stop recording (⌥V)', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Cancel voice input' }).click()
-  await expect(page.getByRole('status')).toHaveCount(0)
+  await expect(page.getByRole('status', { name: 'Voice input' })).toHaveCount(0)
   await expect(composer).toHaveValue('Existing draft. A voice draft to review.')
   await composer.fill('')
 })

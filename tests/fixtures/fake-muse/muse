@@ -1,0 +1,3 @@
+#!/bin/sh
+# Deterministic fake Muse CLI for tests. Set FAKE_MUSE_NODE to pick a specific node binary.
+exec "${FAKE_MUSE_NODE:-node}" "$(dirname "$0")/fake-muse.mjs" "$@"
