@@ -105,7 +105,7 @@ function conversationGroup(session: MuseSession, pinned: string[]) {
 export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => preferencesSchema.parse({}))
   const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting' })
-  const [version, setVersion] = useState('0.2.0')
+  const [version, setVersion] = useState('')
   const [platform, setPlatform] = useState('darwin')
   const [sessions, setSessions] = useState<MuseSession[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)

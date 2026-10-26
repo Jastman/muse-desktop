@@ -33,9 +33,11 @@ unless they are marked as such.
       in the middle of text are always displayed.
 - [x] Tests: `tests/unit/message-text.test.ts` (HTML, XML, JSX, code fences, tags in the middle
       of text, unterminated metadata, titles).
-- Limitation: the allowlist besides `runtime_info` and `pull_request_linking` is based on known
-  CLI/agent conventions. Anything not on the list is shown, so the failure mode is extra
-  visible metadata, never lost user text.
+- Provenance audit (0.3.0-rc.1): the allowlist is now **only** `runtime_info` and
+  `pull_request_linking`, the two tags with observed protocol provenance (`tests/unit/activity.test.ts`).
+  Earlier extra names (`system-reminder`, `environment_context`, `user_instructions`, `command-*`,
+  …) had no verified provenance in this repo and are now displayed as user text. The failure mode
+  is extra visible metadata, never lost user text. `tests/unit/message-text.test.ts` pins this.
 
 ### Recoverable preferences
 
@@ -165,16 +167,47 @@ unless they are marked as such.
   - The fake CLI normalizes renamed session names to lowercase. The SDK documents the rename
     result as a canonical, normalized name, and the existing test expects lowercase.
 
-## Phases 3–7
+## Phase 3 — Search
 
-Tracked in later commits of this branch.
+- [x] `HistorySearchService`/`SearchIndex` (`src/main/search-index.ts`, `history-search.ts`): local,
+      rebuildable, opt-out index with clear/rebuild; derived from CLI history, never authoritative.
+- [x] Project/date/archive filters, message anchors, Ctrl/Cmd+F (in-conversation) and
+      Ctrl/Cmd+Shift+F (history), paginated command menu.
+- [x] Tests: `tests/unit/search-index.test.ts`, `history-search.test.ts`, `find.test.ts`,
+      `tests/e2e/search.spec.ts` (fake CLI).
+- Fixed in 0.3.0-rc.1: `desktop.spec.ts` "real project files, docs and commands are accessible"
+  failed because (a) the command-menu input is now a `combobox` and (b) the first result for any
+  query is "Search messages for …", so Enter ran a history search instead of the theme. Both were
+  stale test assumptions, not product bugs; the test now uses the combobox role and chooses the
+  "Switch to Moonlight" option explicitly. The `data-theme` assertion is unchanged.
 
-## Commands run (latest phase)
+## Phases 4–7 — status in this release candidate (0.3.0-rc.1)
 
-| Command                                                                                                                              | Result                    |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
-| `npx tsc --noEmit`                                                                                                                   | pass                      |
-| `npx vitest run`                                                                                                                     | see the latest phase note |
-| `npx electron-vite build`                                                                                                            | pass                      |
-| `xvfb-run -a npx playwright test tests/e2e/setup.spec.ts tests/e2e/core.spec.ts`                                                     | 10 passed                 |
-| `MUSE_BIN=$PWD/tests/fixtures/fake-muse/muse FAKE_MUSE_NODE=$(which node) xvfb-run -a npx playwright test tests/e2e/desktop.spec.ts` | 10 passed                 |
+Not everything in the original roadmap is implemented. This is the honest state.
+
+| Item                                                                                                                                | Status                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Version single source of truth (`src/shared/version.ts` ← package.json)                                                             | **Done**, tested (`tests/unit/version.test.ts`), verified in built main bundle and packaged asar                |
+| Markup provenance audit                                                                                                             | **Done** (see Phase 1)                                                                                          |
+| 10,000-item synthetic benchmark                                                                                                     | **Done for the data path** (`npm run benchmark`); renderer/DOM render timing **not measured**                   |
+| Diagnostics redaction + bounded log primitives                                                                                      | **Done as a tested library** (`src/main/diagnostics.ts`); **not wired to any UI/IPC**, nothing is collected     |
+| CI: fake-CLI E2E on macOS, Linux (Xvfb), Windows; trace upload                                                                      | **Configured, not yet observed running** on all three runners                                                   |
+| App.tsx controller split / revisioned IPC deltas / virtualized transcript / paged session fetch                                     | **Not done** (App.tsx still contains the remaining orchestration; transcript renders every item)                |
+| Resizable sidebar/inspector, native Win/Linux frame by default, quiet first-run                                                     | Quiet default and Win/Linux shortcuts exist from earlier phases; resizable panes and native frames **not done** |
+| Accessibility automation (axe etc.), focus-restore audit, reduced-motion jumps                                                      | **Not done** beyond existing combobox/listbox semantics and tests                                               |
+| Task/turn review panel with check evidence, checkpoints/worktrees, plan→execute→verify, project instructions editor, diagnostics UI | **Not done**. No UI for these is shown, so nothing is advertised that does not exist                            |
+| Real-CLI integration                                                                                                                | **Not run** (no Muse CLI installed in this environment)                                                         |
+
+## Commands run (0.3.0-rc.1, Linux x64, Node 22.23.3, Electron 44.7.0)
+
+| Command                                                                                                   | Result                                  |
+| --------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `npm run typecheck`                                                                                       | pass                                    |
+| `npx vitest run`                                                                                          | 15 files, 111 tests passed              |
+| `npm run format:check`                                                                                    | pass                                    |
+| `npx electron-vite build`                                                                                 | pass                                    |
+| `xvfb-run -a npx playwright test tests/e2e/setup.spec.ts tests/e2e/core.spec.ts tests/e2e/search.spec.ts` | 14 passed (fake CLI)                    |
+| `MUSE_BIN=$PWD/tests/fixtures/fake-muse/muse xvfb-run -a npx playwright test tests/e2e/desktop.spec.ts`   | 10 passed twice (fake CLI)              |
+| `npx playwright test tests/e2e/desktop.spec.ts` (no `MUSE_BIN`)                                           | fails at setup: no Muse CLI installed   |
+| `npm run benchmark`                                                                                       | pass; see [performance](performance.md) |
+| `npx electron-builder --linux --dir`                                                                      | pass; asar contains version 0.3.0-rc.1  |

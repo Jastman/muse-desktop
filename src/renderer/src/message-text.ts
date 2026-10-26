@@ -6,26 +6,13 @@
  *
  * Only when a message has no `displayText` (for example prompts typed in the terminal CLI) may the
  * raw `text` carry protocol metadata that the CLI or a hook prepended. In that case we remove only
- * complete, explicitly allow-listed metadata blocks that appear at the very start or end of the
+ * complete metadata blocks whose tag names are verified as emitted by the Muse protocol
+ * (`runtime_info`, `pull_request_linking`; see tests/unit/activity.test.ts). Tag names seen in other
+ * tools (for example `system-reminder`) have no verified provenance here and are user content.
+ * Only complete blocks that appear at the very start or end of the
  * text. Any other markup — HTML, XML, JSX, generics, code — is user content and is preserved.
  */
-export const injectedMetadataTags = [
-  'runtime_info',
-  'pull_request_linking',
-  'system-reminder',
-  'system_reminder',
-  'environment_context',
-  'environment-context',
-  'user_instructions',
-  'user-instructions',
-  'muse-context',
-  'muse_context',
-  'command-name',
-  'command-message',
-  'command-args',
-  'local-command-stdout',
-  'local-command-stderr',
-] as const
+export const injectedMetadataTags = ['runtime_info', 'pull_request_linking'] as const
 
 const tagPattern = injectedMetadataTags
   .map((tag) => tag.replace(/[-_]/g, (char) => `\\${char}`))
