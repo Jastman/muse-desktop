@@ -42,6 +42,7 @@ export class MuseHost {
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private refreshing = new Set<string>()
   private closing = false
+  private epoch = 0
 
   constructor(private emit: (event: AppEvent) => void) {}
 
@@ -54,6 +55,7 @@ export class MuseHost {
   }
 
   private async start(cliPath: string): Promise<ConnectionStatus> {
+    this.epoch++
     await this.close()
     this.closing = false
     this.setStatus({ state: 'connecting' })
@@ -135,8 +137,8 @@ export class MuseHost {
   }
 
   private setStatus(status: ConnectionStatus) {
-    this.status = status
-    this.emit({ type: 'connection', status })
+    this.status = { ...status, epoch: this.epoch }
+    this.emit({ type: 'connection', status: this.status })
   }
 
   private get connection() {
@@ -175,16 +177,22 @@ export class MuseHost {
     return this.view(live)
   }
 
-  async open(sessionId: string): Promise<SessionView> {
+  async open(sessionId: string, refresh = false): Promise<SessionView> {
     const existing = this.sessions.get(sessionId)
-    if (existing?.loaded) return this.view(existing)
+    if (existing?.loaded && !refresh) return this.view(existing)
+    const epoch = this.epoch
     if (existing) await this.unsubscribe(sessionId)
     const result = sessionResultSchema.parse(
       await this.connection.request('session/read', { sessionId, excludeItems: false }),
     )
-    const live = await this.hydrate(result, false)
+    if (epoch !== this.epoch)
+      throw new Error('The Muse connection changed. Open the conversation again.')
+    const loaded = existing?.loaded ?? false
+    const live = await this.hydrate(result, loaded)
+    if (loaded) await this.refreshPending(sessionId)
     try {
       await this.connection.request('view/subscribe', { sessionId, after: result.viewCursor })
+      if (!loaded) await this.refreshPending(sessionId)
     } catch (error) {
       // CLI 1.4.7 can read durable history without loading, but requires a loaded
       // session for live subscriptions. Do not claim another process's session just to view it.
@@ -244,6 +252,17 @@ export class MuseHost {
   private async hydrate(result: z.infer<typeof sessionResultSchema>, loaded: boolean) {
     const live = this.seed(result, loaded)
     if (result.history?.mode !== 'none') return live
+    await this.pageHistory(result.session.sessionId, result.viewCursor, live.store)
+    live.view.historyNotice = undefined
+    return live
+  }
+
+  /** Folds durable history pages into a store up to the head cursor read with the session. */
+  private async pageHistory(
+    sessionId: string,
+    headCursor: string | undefined,
+    store: ItemStore<TranscriptItem>,
+  ) {
     const cursors = new Set<string>()
     let cursor: string | undefined
     let reachedHead = false
@@ -260,24 +279,24 @@ export class MuseHost {
         })
         .parse(
           await this.connection.request('view/page', {
-            sessionId: result.session.sessionId,
+            sessionId: sessionId,
             direction: 'forward',
             limit: 500,
             ...(cursor ? { cursor } : {}),
           }),
         )
       for (const event of page.events) {
-        if (event.params.sessionId !== result.session.sessionId)
+        if (event.params.sessionId !== sessionId)
           throw new Error('Muse returned history for a different conversation.')
         if (['item/started', 'item/updated', 'item/completed'].includes(event.method))
-          live.store.apply(itemSchema.parse(event.params.item))
+          store.apply(itemSchema.parse(event.params.item))
         if (event.method === 'item/delta') {
           const delta = z
             .object({ itemId: z.string(), delta: z.string(), field: z.string().optional() })
             .parse(event.params)
-          live.store.applyDelta(delta.itemId, delta.delta, delta.field)
+          store.applyDelta(delta.itemId, delta.delta, delta.field)
         }
-        if (event.params.viewCursor === result.viewCursor) {
+        if (event.params.viewCursor === headCursor) {
           reachedHead = true
           break
         }
@@ -287,8 +306,22 @@ export class MuseHost {
         throw new Error('Muse returned a repeated transcript cursor. Reconnect and try again.')
       if (cursor) cursors.add(cursor)
     } while (cursor && !reachedHead)
-    live.view.historyNotice = undefined
-    return live
+  }
+
+  /**
+   * Reads a conversation's durable history without loading, subscribing to or claiming it.
+   * Used by the local search index; the CLI stays the source of truth.
+   */
+  async readHistory(sessionId: string): Promise<{ items: TranscriptItem[]; partial: boolean }> {
+    const live = this.sessions.get(sessionId)
+    if (live?.loaded) return { items: [...live.store.list()], partial: false }
+    const result = sessionResultSchema.parse(
+      await this.connection.request('session/read', { sessionId, excludeItems: false }),
+    )
+    const store = new ItemStore<TranscriptItem>()
+    store.seed(result.history?.items ?? result.history?.snapshot?.state.items ?? [])
+    if (result.history?.mode === 'none') await this.pageHistory(sessionId, result.viewCursor, store)
+    return { items: [...store.list()], partial: false }
   }
 
   private async refreshPending(sessionId: string) {
@@ -310,15 +343,41 @@ export class MuseHost {
     await this.resume(sessionId)
     const live = this.requireSession(sessionId)
     live.view.error = undefined
-    await this.connection.command(
-      'turn/start',
-      { sessionId, input, displayText, reasoningEffort: effort, ifBusy: mode },
-      { maxAttempts: 1 },
-    )
+    const connection = this.connection
+    let ack: unknown
+    try {
+      // maxAttempts 1: a send is never replayed automatically, even after a transport failure.
+      ack = await connection.command(
+        'turn/start',
+        { sessionId, input, displayText, reasoningEffort: effort, ifBusy: mode },
+        { maxAttempts: 1 },
+      )
+    } catch (error) {
+      if (error instanceof MspError) throw error
+      throw new SendOutcomeUnknownError(messageOf(error))
+    }
+    const result = z
+      .object({ disposition: z.string().optional(), turnId: z.string().optional() })
+      .passthrough()
+      .parse(ack ?? {})
+    if (result.disposition === 'queued' && result.turnId) {
+      live.view.queuedTurns = [
+        ...(live.view.queuedTurns ?? []).filter((turn) => turn.turnId !== result.turnId),
+        { turnId: result.turnId, displayText },
+      ]
+      this.schedule(sessionId)
+    }
+    return { disposition: result.disposition ?? 'started', turnId: result.turnId }
   }
 
   async cancel(sessionId: string) {
+    const live = this.requireSession(sessionId)
     await this.connection.command('turn/cancel', { sessionId }, { maxAttempts: 1 })
+    // Admission only: the turn has stopped when turn/completed arrives.
+    if (live.view.session.status === 'running') {
+      live.view.cancelRequested = true
+      this.schedule(sessionId)
+    }
   }
 
   async compact(sessionId: string) {
@@ -474,6 +533,7 @@ export class MuseHost {
     if (!sessionId) return
     const live = this.sessions.get(sessionId)
     if (!live) return
+    if (method !== 'turn/retryScheduled' && method.startsWith('item/')) live.view.retry = undefined
     if (['item/started', 'item/updated', 'item/completed'].includes(method)) {
       const item = itemSchema.parse(params.item)
       live.store.apply(item)
@@ -485,14 +545,35 @@ export class MuseHost {
         .parse(params)
       live.store.applyDelta(delta.itemId, delta.delta, delta.field)
     } else if (method === 'turn/started') {
-      live.view.session.activeTurnId = z.string().parse(params.turnId)
+      const turnId = z.string().parse(params.turnId)
+      live.view.session.activeTurnId = turnId
       live.view.session.status = 'running'
+      live.view.queuedTurns = live.view.queuedTurns?.filter((turn) => turn.turnId !== turnId)
+    } else if (method === 'turn/retryScheduled') {
+      const retry = z
+        .object({
+          nextAttempt: z.number(),
+          maxAttempts: z.number(),
+          retryDelayMs: z.number(),
+          reason: z.string(),
+        })
+        .safeParse(params)
+      if (retry.success) live.view.retry = { ...retry.data, receivedAt: Date.now() }
+    } else if (method === 'turn/unqueued') {
+      live.view.queuedTurns = live.view.queuedTurns?.filter((turn) => turn.turnId !== params.turnId)
     } else if (method === 'turn/completed') {
       live.view.session.activeTurnId = null
       live.view.session.status = 'idle'
       live.view.session.updatedAt = new Date().toISOString()
       const error = z.object({ message: z.string() }).optional().parse(params.error)
       live.view.error = error?.message
+      live.view.cancelRequested = false
+      live.view.retry = undefined
+      live.view.lastTurn = {
+        turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
+        terminal: typeof params.terminal === 'string' ? params.terminal : 'completed',
+        durationMs: typeof params.durationMs === 'number' ? params.durationMs : undefined,
+      }
       this.emit({ type: 'sessions-changed' })
     } else if (method === 'session/statusChanged') {
       live.view.session.status = z.string().parse(params.status)
@@ -568,6 +649,15 @@ export class MuseHost {
     this.sessions.clear()
     if (this.host) await this.host.close()
     this.host = undefined
+  }
+}
+
+/** The request may have reached the CLI before the transport failed; never resend automatically. */
+export class SendOutcomeUnknownError extends Error {
+  constructor(cause: string) {
+    super(
+      `Muse may have received this message before the connection failed (${cause}). Check the conversation before sending it again.`,
+    )
   }
 }
 

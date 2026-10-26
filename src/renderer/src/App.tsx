@@ -1,7 +1,7 @@
 import { Select } from './components/Select'
 import { isBackgroundOnly } from './activity'
 import { composerCommands, parseComposerCommand } from './commands'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Archive,
   ArrowRight,
@@ -29,6 +29,7 @@ import {
   SquarePen,
   Sparkles,
   X,
+  TextSearch,
 } from 'lucide-react'
 import {
   preferencesSchema,
@@ -39,10 +40,15 @@ import {
   type MuseModel,
   type MuseSession,
   type Preferences,
+  type PreferencesRecovery,
   type SessionView,
   type Theme,
 } from '../../shared/protocol'
-import { Composer } from './components/Composer'
+import { Composer, type SendState } from './components/Composer'
+import { PreferencesRecoveryBanner } from './components/RecoveryBanner'
+import { ActivityStrip } from './components/ActivityStrip'
+import { announcement, deriveActivity } from './agent-activity'
+import { newDraftKey, sessionDraftKey, useDrafts } from './controllers/drafts'
 import { CommandMenu } from './components/CommandMenu'
 import { Inspector } from './components/Inspector'
 import {
@@ -54,7 +60,9 @@ import {
   sessionTitle,
 } from './components/Primitives'
 import { Settings, themes } from './components/Settings'
-import { Transcript } from './components/Transcript'
+import { Transcript, type JumpRequest } from './components/Transcript'
+import { HistorySearch } from './components/HistorySearch'
+import { FindBar } from './components/FindBar'
 import { DocsPage, FilesPage, ProjectsPage } from './components/WorkspacePages'
 
 const starters = [
@@ -107,11 +115,16 @@ export function App() {
   const [view, setView] = useState<SessionView | null>(null)
   const [models, setModels] = useState<MuseModel[]>([])
   const [modelId, setModelId] = useState('')
-  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
+  const [sendState, setSendState] = useState<SendState>()
+  const [preferencesRecovery, setPreferencesRecovery] = useState<PreferencesRecovery>()
   const [loadingSession, setLoadingSession] = useState(false)
   const [sidebar, setSidebar] = useState(true)
   const [inspector, setInspector] = useState(false)
+  const [jumpRequest, setJumpRequest] = useState<JumpRequest>()
+  const [historySearch, setHistorySearch] = useState<{ query: string } | null>(null)
+  const [finding, setFinding] = useState(0)
+  const [liveMessage, setLiveMessage] = useState('')
   const [settings, setSettings] = useState<'appearance' | 'connection' | false>(false)
   const [page, setPage] = useState<'chat' | 'projects' | 'files' | 'docs'>('chat')
   const [commands, setCommands] = useState(false)
@@ -126,6 +139,9 @@ export function App() {
     window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
   const activeId = useRef<string | null>(null)
+  const statusRef = useRef(status)
+  statusRef.current = status
+  const reconnectSequence = useRef(0)
   const openSequence = useRef(0)
   const historySequence = useRef(0)
   const hasLoadedHistory = useRef(false)
@@ -135,11 +151,31 @@ export function App() {
     preferences.theme === 'system' ? (darkSystem ? 'moonlight' : 'daylight') : preferences.theme
   const modKey = platform === 'darwin' ? '⌘' : 'Ctrl'
   const altKey = platform === 'darwin' ? '⌥' : 'Alt+'
-  const draftKey = view?.session.sessionId || `new:${project}`
-  const draft = drafts[draftKey] || ''
   const running = view?.session.status === 'running'
+  const activity = useMemo(() => deriveActivity(view, status), [view, status])
+  const spoken = announcement(activity)
+  const announcedFor = useRef<{ session?: string; text: string }>({ text: '' })
+  useEffect(() => {
+    const session = view?.session.sessionId
+    const previous = announcedFor.current
+    announcedFor.current = { session, text: spoken }
+    // Announce changes within one conversation only, never the state found when opening it.
+    if (!preferences?.announceUpdates || session !== previous.session || spoken === previous.text)
+      return
+    if (spoken) setLiveMessage(spoken)
+  }, [spoken, view?.session.sessionId, preferences?.announceUpdates])
 
   const showError = useCallback((message: string) => setToast({ message, kind: 'error' }), [])
+  const drafts = useDrafts(showError)
+  const draftKey = view ? sessionDraftKey(view.session.sessionId) : newDraftKey(project)
+  const draft = drafts.text(draftKey)
+  const appendLine = (line: string) => {
+    const existing = drafts.text(draftKey)
+    drafts.setText(
+      draftKey,
+      `${existing}${existing && !existing.endsWith('\n') ? '\n' : ''}${line}\n`,
+    )
+  }
   const showSuccess = (message: string) => setToast({ message, kind: 'success' })
   const refreshSessions = useCallback(async () => {
     const sequence = ++historySequence.current
@@ -190,6 +226,20 @@ export function App() {
     document.documentElement.dataset.reduceMotion = String(preferences.reduceMotion)
   }, [theme, preferences.fontSize, preferences.reduceMotion])
   useEffect(() => {
+    if (sendState?.phase !== 'accepted') return
+    const timer = setTimeout(
+      () => setSendState((current) => (current === sendState ? undefined : current)),
+      6000,
+    )
+    return () => clearTimeout(timer)
+  }, [sendState])
+  useEffect(() => {
+    if (drafts.notice) {
+      showError(drafts.notice)
+      drafts.dismissNotice()
+    }
+  }, [drafts, showError])
+  useEffect(() => {
     if (!toast || toast.kind === 'error') return
     const timer = setTimeout(() => setToast(null), 4000)
     return () => clearTimeout(timer)
@@ -197,7 +247,10 @@ export function App() {
   useEffect(() => {
     const receive = (event: AppEvent) => {
       if (event.type === 'connection') setStatus(event.status)
-      if (event.type === 'preferences') setPreferences(event.preferences)
+      if (event.type === 'preferences') {
+        setPreferences(event.preferences)
+        setPreferencesRecovery(event.recovery)
+      }
       if (event.type === 'error') showError(event.message)
       if (event.type === 'menu') menuHandler.current(event.action)
       if (event.type === 'session') {
@@ -220,6 +273,7 @@ export function App() {
       .bootstrap()
       .then((data) => {
         setPreferences(data.preferences)
+        setPreferencesRecovery(data.preferencesRecovery)
         setStatus(data.status)
         setVersion(data.version)
         setPlatform(data.platform || 'darwin')
@@ -263,15 +317,15 @@ export function App() {
       showError(error instanceof Error ? error.message : String(error))
     }
   }
-  const openSession = async (sessionId: string) => {
+  const openSession = async (sessionId: string, force = false) => {
     setPage('chat')
-    if (activeId.current === sessionId && view?.session.sessionId === sessionId) return
+    if (!force && activeId.current === sessionId && view?.session.sessionId === sessionId) return
     const sequence = ++openSequence.current
-    const showSpinner = !view
+    const showSpinner = !view && !force
     if (showSpinner) setLoadingSession(true)
     activeId.current = sessionId
     try {
-      const opened = await window.muse.openSession(sessionId)
+      const opened = await window.muse.openSession(sessionId, force)
       if (openSequence.current !== sequence) return
       setView(opened)
       setProject(opened.session.workspaceRoot || '')
@@ -279,21 +333,24 @@ export function App() {
     } catch (error) {
       if (openSequence.current === sequence) {
         showError(error instanceof Error ? error.message : String(error))
-        activeId.current = view?.session.sessionId || null
+        activeId.current = force ? sessionId : view?.session.sessionId || null
       }
     } finally {
       if (openSequence.current === sequence) setLoadingSession(false)
     }
   }
   const reconnect = () => {
+    const sequence = ++reconnectSequence.current
+    const previousEpoch = statusRef.current.epoch
     void window.muse
       .connect()
       .then((result) => {
+        if (reconnectSequence.current !== sequence) return
         setStatus(result)
-        if (result.state === 'ready') {
-          const sessionId = activeId.current
-          if (sessionId) void openSession(sessionId)
-        }
+        // A cancelled confirmation returns the unchanged connection; only a new host needs rehydration.
+        if (result.state !== 'ready' || result.epoch === previousEpoch) return
+        const sessionId = activeId.current
+        if (sessionId) void openSession(sessionId, true)
       })
       .catch((error: Error) => showError(error.message))
   }
@@ -301,21 +358,26 @@ export function App() {
     if (action === 'new') startNew()
     if (action === 'open') void chooseProject()
     if (action === 'search') setCommands(true)
+    if (action === 'search-history') setHistorySearch({ query: '' })
+    if (action === 'find' && view && page === 'chat') setFinding((value) => value + 1)
     if (action === 'settings') setSettings('appearance')
     if (action === 'sidebar') setSidebar((value) => !value)
   }
   useEffect(() => {
     if (platform === 'darwin') return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
       const key = event.key.toLowerCase()
-      const actions: Record<string, string> = {
-        n: 'new',
-        o: 'open',
-        k: 'search',
-        ',': 'settings',
-        b: 'sidebar',
-      }
+      const actions: Record<string, string> = event.shiftKey
+        ? { f: 'search-history' }
+        : {
+            n: 'new',
+            o: 'open',
+            k: 'search',
+            f: 'find',
+            ',': 'settings',
+            b: 'sidebar',
+          }
       const action = actions[key]
       if (!action) return
       event.preventDefault()
@@ -393,7 +455,7 @@ export function App() {
             }
           }
         }
-        setDrafts((values) => ({ ...values, [key]: '' }))
+        drafts.setText(key, '')
         return true
       }
       let current = view
@@ -408,8 +470,12 @@ export function App() {
         if (openSequence.current === sequence) activeId.current = current.session.sessionId
       }
       const submittedSessionId = current.session.sessionId
+      // A new conversation's draft moves to the conversation it created.
+      const target = sessionDraftKey(submittedSessionId)
+      if (target !== key) drafts.setText(key, '')
+      const optimisticId = `optimistic-${Date.now()}`
       const optimisticItem = {
-        itemId: `optimistic-${Date.now()}`,
+        itemId: optimisticId,
         kind: 'userMessage',
         revision: 0,
         status: 'completed',
@@ -417,37 +483,50 @@ export function App() {
         displayText: text,
         recordedAt: new Date().toISOString(),
       }
+      setSendState({ key: target, phase: 'sending' })
+      await drafts.markSending(target, text, attachments)
+      if (target !== key) drafts.updateAttachments(key, () => [])
       if (openSequence.current === sequence) {
         setView((existing) => {
           const base = existing?.session.sessionId === submittedSessionId ? existing : current!
-          const alreadyHasUserMessage = base.items.some(
+          const echoed = base.items.some(
             (item) =>
-              item.kind === 'userMessage' && (item.text === text || item.displayText === text),
+              item.kind === 'userMessage' &&
+              item.revision > 0 &&
+              (item.displayText === text || item.text === text) &&
+              Date.parse(item.recordedAt || '') >= Date.parse(optimisticItem.recordedAt) - 1000,
           )
-          return {
-            ...base,
-            session: { ...base.session, status: 'running' },
-            items: alreadyHasUserMessage ? base.items : [...base.items, optimisticItem],
-          }
+          return echoed ? base : { ...base, items: [...base.items, optimisticItem] }
         })
       }
-      setDrafts((values) => ({
-        ...values,
-        [key]: values[key] === text ? '' : values[key] || '',
-        [submittedSessionId]:
-          values[submittedSessionId] === text ? '' : values[submittedSessionId] || '',
-      }))
-      await window.muse.send({
-        sessionId: current.session.sessionId,
+      const result = await window.muse.send({
+        sessionId: submittedSessionId,
         text,
         attachments: attachments.map((file) => file.id),
+        attachmentScope: key,
         effort: preferences.reasoningEffort,
         mode,
       })
+      if (result.status !== 'accepted') {
+        // Roll back only the optimistic echo; authoritative items from the CLI are untouched.
+        setView((existing) =>
+          existing?.session.sessionId === submittedSessionId
+            ? { ...existing, items: existing.items.filter((item) => item.itemId !== optimisticId) }
+            : existing,
+        )
+        await drafts.settle(target, result.status, text, attachments)
+        setSendState({ key: target, phase: result.status, message: result.message })
+        if (result.status === 'rejected') showError(`${result.message} Your draft was restored.`)
+        return false
+      }
+      await drafts.settle(target, 'accepted', text, attachments)
+      setSendState({ key: target, phase: 'accepted', disposition: result.disposition })
       return true
     } catch (error) {
-      setDrafts((values) => ({ ...values, [key]: values[key] || text }))
-      showError(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      drafts.setText(key, drafts.text(key) || text)
+      setSendState({ key, phase: 'rejected', message })
+      showError(message)
       return false
     } finally {
       setSubmitting(false)
@@ -506,6 +585,24 @@ export function App() {
       className={`app-shell ${sidebar ? '' : 'sidebar-hidden'} ${inspector ? 'with-inspector' : ''}`}
       style={{ '--background-presence': preferences.backgroundIntensity / 100 } as CSSProperties}
     >
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {liveMessage}
+      </div>
+      {preferencesRecovery && (
+        <PreferencesRecoveryBanner
+          recovery={preferencesRecovery}
+          onAction={async (action) => {
+            try {
+              const result = await window.muse.recoverPreferences(action)
+              setPreferences(result.preferences)
+              setPreferencesRecovery(result.recovery)
+              if (!result.recovery) showSuccess('Preferences saved.')
+            } catch (error) {
+              showError(error instanceof Error ? error.message : String(error))
+            }
+          }}
+        />
+      )}
       {platform !== 'darwin' && (
         <div className="window-traffic-lights" role="group" aria-label="Window controls">
           <button
@@ -564,6 +661,14 @@ export function App() {
             </span>
             <span>Search conversations</span>
             <kbd>{modKey} K</kbd>
+          </button>
+          <button
+            className="search-messages-button"
+            aria-label="Search messages"
+            data-tooltip={`Search messages (${modKey} ⇧ F)`}
+            onClick={() => setHistorySearch({ query: '' })}
+          >
+            <TextSearch size={15} />
           </button>
         </div>
         <nav className="main-nav" aria-label="Main navigation">
@@ -968,10 +1073,7 @@ export function App() {
             }}
             onMention={(path) => {
               setPage('chat')
-              setDrafts((current) => ({
-                ...current,
-                [draftKey]: `${current[draftKey] || ''}${current[draftKey] ? '\n' : ''}Please look at the project file: ${JSON.stringify(path)}\n`,
-              }))
+              appendLine(`Please look at the project file: ${JSON.stringify(path)}`)
             }}
           />
         )}
@@ -984,7 +1086,30 @@ export function App() {
                 <p>Loading conversation…</p>
               </div>
             ) : view ? (
-              <Transcript key={view.session.sessionId} view={view} onError={showError} />
+              <>
+                {finding > 0 && (
+                  <FindBar
+                    key={`find:${view.session.sessionId}`}
+                    focusSignal={finding}
+                    items={view.items}
+                    onReveal={(itemId) =>
+                      setJumpRequest({
+                        itemId,
+                        sessionId: view.session.sessionId,
+                        nonce: Date.now(),
+                        focus: false,
+                      })
+                    }
+                    onClose={() => setFinding(0)}
+                  />
+                )}
+                <Transcript
+                  key={view.session.sessionId}
+                  view={view}
+                  onError={showError}
+                  jumpRequest={jumpRequest}
+                />
+              </>
             ) : (
               <div className="welcome">
                 <div className="welcome-content">
@@ -1027,7 +1152,7 @@ export function App() {
                         className="starter-card"
                         key={starter.title}
                         onClick={() => {
-                          setDrafts((current) => ({ ...current, [draftKey]: starter.prompt }))
+                          drafts.setText(draftKey, starter.prompt)
                           document.querySelector<HTMLTextAreaElement>('textarea')?.focus()
                         }}
                       >
@@ -1045,9 +1170,17 @@ export function App() {
             )}
             {!loadingSession && (
               <div className={`composer-dock ${view ? 'conversation-dock' : ''}`}>
+                {view && (
+                  <ActivityStrip
+                    activity={activity}
+                    queued={view.queuedTurns}
+                    onJumpToItem={(itemId) => setJumpRequest({ itemId, nonce: Date.now() })}
+                    onReview={() => setInspector(true)}
+                  />
+                )}
                 <Composer
                   draft={draft}
-                  setDraft={(value) => setDrafts((current) => ({ ...current, [draftKey]: value }))}
+                  setDraft={(value) => drafts.setText(draftKey, value)}
                   running={Boolean(running)}
                   backgroundOnly={Boolean(view && isBackgroundOnly(view.items))}
                   submitting={submitting}
@@ -1059,6 +1192,22 @@ export function App() {
                   preferences={preferences}
                   onModel={setModel}
                   onEffort={(reasoningEffort) => savePreferences({ reasoningEffort })}
+                  draftKey={draftKey}
+                  attachments={drafts.attachments(draftKey)}
+                  staleAttachments={drafts.stale(draftKey)}
+                  onDismissStale={(index) => drafts.dismissStale(draftKey, index)}
+                  uncertainSend={drafts.uncertain(draftKey)}
+                  onDismissUncertain={() => drafts.dismissUncertain(draftKey)}
+                  sendState={sendState?.key === draftKey ? sendState : undefined}
+                  cancelRequested={Boolean(view?.cancelRequested)}
+                  onAttachments={drafts.updateAttachments}
+                  onVoiceText={(key, text) => {
+                    drafts.appendText(key, text)
+                    if (key !== draftKey)
+                      showSuccess(
+                        'Your transcription was added to the draft where recording started.',
+                      )
+                  }}
                   onSubmit={submit}
                   onCancel={() => {
                     if (view)
@@ -1082,10 +1231,7 @@ export function App() {
         onClose={() => setInspector(false)}
         onMentionDiff={(path) => {
           setPage('chat')
-          setDrafts((current) => ({
-            ...current,
-            [draftKey]: `${current[draftKey] || ''}${current[draftKey] ? '\n' : ''}Please review the changes in @${path}\n`,
-          }))
+          appendLine(`Please review the changes in @${path}`)
         }}
         onError={showError}
       />
@@ -1100,6 +1246,10 @@ export function App() {
           onClose={() => setSettings(false)}
           onError={showError}
           onReconnect={reconnect}
+          onClearDrafts={async () => {
+            await drafts.clearAll()
+            showSuccess('Saved drafts deleted.')
+          }}
         />
       )}
       {commands && (
@@ -1118,6 +1268,25 @@ export function App() {
           onSettings={() => setSettings('appearance')}
           onTheme={(theme) => savePreferences({ theme })}
           onClose={() => setCommands(false)}
+          onSearchHistory={(query) => setHistorySearch({ query })}
+          onFind={view && page === 'chat' ? () => setFinding((value) => value + 1) : undefined}
+        />
+      )}
+      {historySearch && (
+        <HistorySearch
+          initialQuery={historySearch.query}
+          projects={[
+            ...new Set(
+              sessions
+                .map((session) => session.workspaceRoot)
+                .filter((root): root is string => Boolean(root)),
+            ),
+          ]}
+          onClose={() => setHistorySearch(null)}
+          onOpen={(hit) => {
+            setJumpRequest({ itemId: hit.itemId, sessionId: hit.sessionId, nonce: Date.now() })
+            void openSession(hit.sessionId)
+          }}
         />
       )}
       {rename && view && (

@@ -1,10 +1,7 @@
 import { expect, it } from 'vitest'
 import { isInternalActivity, isBackgroundOnly } from '../../src/renderer/src/activity'
-import {
-  cleanMessageText,
-  cleanPromptText,
-  sessionTitle,
-} from '../../src/renderer/src/components/Primitives'
+import { cleanPromptText, sessionTitle } from '../../src/renderer/src/components/Primitives'
+import { userMessageText } from '../../src/renderer/src/message-text'
 import type { TranscriptItem } from '../../src/shared/protocol'
 
 it('moves CLI bookkeeping out of chat without hiding tools, delegated work, or failed results', () => {
@@ -34,7 +31,9 @@ it('strips harness metadata tags from conversation titles and user messages', ()
     }),
   ).toBe('I want you to do a thorough dive on this Harness Terminal.')
   expect(
-    cleanMessageText('<system-reminder>Internal note</system-reminder>First line\nSecond line'),
+    userMessageText({
+      text: '<system-reminder>Internal note</system-reminder>First line\nSecond line',
+    }),
   ).toBe('First line\nSecond line')
   expect(sessionTitle({ firstUserPrompt: '<runtime_info>unclosed metadata only' })).toBe(
     'Untitled conversation',

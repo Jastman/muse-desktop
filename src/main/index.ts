@@ -12,10 +12,9 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { execFile, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, extname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { z } from 'zod'
@@ -24,14 +23,26 @@ import {
   effortSchema,
   preferencesPatchSchema,
   preferencesSchema,
+  draftKeySchema,
+  historySearchSchema,
+  storedDraftSchema,
   type AppEvent,
-  type Attachment,
+  type AttachmentInput,
   type Preferences,
+  type SendResult,
 } from '../shared/protocol'
-import { MuseHost, messageOf } from './muse-host'
-import { readPreferences, writePreferences } from './preferences'
+import { MuseHost, SendOutcomeUnknownError, messageOf } from './muse-host'
+import {
+  loadPreferences,
+  recoverPreferences,
+  writePreferences,
+  type PreferencesState,
+} from './preferences'
+import { DraftStore } from './drafts'
+import { HistorySearchService } from './history-search'
 import { getGitDiff, getGitStatus } from './git'
 import { listProjectFiles, readProjectFile } from './files'
+import { AttachmentStore, MAX_ATTACHMENTS, MAX_FILE_BYTES } from './attachments'
 import { VoiceTranscriber } from './voice'
 import {
   initializeUpdates,
@@ -61,10 +72,14 @@ const pathSchema = z.string().min(1).max(4096)
 const rendererPath = resolve(directory, '../renderer/index.html')
 const preferencePath = join(app.getPath('userData'), 'preferences.json')
 let preferences: Preferences
+let preferenceState: PreferencesState = { preferences: preferencesSchema.parse({}), writable: true }
+const drafts = new DraftStore({ path: join(app.getPath('userData'), 'drafts.json') })
 let window: BrowserWindow | undefined
 let quitting = false
 let preferenceWrites: Promise<void> = Promise.resolve()
-const selectedFiles = new Map<string, { attachment: Attachment; path: string }>()
+const attachments = new AttachmentStore()
+const scopeSchema = z.string().min(1).max(4200)
+const draftInputSchema = storedDraftSchema.omit({ key: true, updatedAt: true }).strict()
 const previousStatuses = new Map<string, string>()
 
 function emit(event: AppEvent) {
@@ -89,9 +104,21 @@ function emit(event: AppEvent) {
     previousStatuses.set(session.sessionId, session.status)
     setUpdaterBusy([...previousStatuses.values()].some((status) => status === 'running'))
   }
+  if (event.type === 'connection' && event.status.state === 'ready') history.schedule(1500)
+  if (event.type === 'sessions-changed') history.schedule()
   if (window && !window.isDestroyed()) window.webContents.send('muse:event', event)
 }
 const muse = new MuseHost(emit)
+const history = new HistorySearchService({
+  path: join(app.getPath('userData'), 'search-index.json'),
+  source: {
+    listPage: (cursor) => muse.list(cursor),
+    readSession: (sessionId) => muse.readHistory(sessionId),
+  },
+  enabled: () => Boolean(preferences?.historyIndex),
+  connected: () => muse.status.state === 'ready',
+  onStatus: (status) => emit({ type: 'search-index', status }),
+})
 const voice = new VoiceTranscriber()
 let microphoneEnabled = false
 
@@ -123,18 +150,37 @@ function handle(channel: string, action: (...args: unknown[]) => unknown) {
   })
 }
 
+function applyTheme() {
+  nativeTheme.themeSource =
+    preferences.theme === 'system'
+      ? 'system'
+      : ['moonlight', 'muse', 'plush'].includes(preferences.theme)
+        ? 'dark'
+        : 'light'
+}
+
+/** Draft keys may only name a conversation id or a project the user already opened. */
+async function knownDraftKey(value: unknown) {
+  const key = draftKeySchema.parse(value)
+  if (key.startsWith('new:')) {
+    const project = key.slice(4)
+    if (project && !preferences.recentProjects.includes(project))
+      throw new Error('Drafts can only be saved for projects opened in Muse Desktop.')
+  }
+  return key
+}
+
 async function savePreferences(patch: Partial<Preferences>) {
   const write = preferenceWrites.then(async () => {
     const snapshot = preferencesSchema.parse({ ...preferences, ...patch })
-    await writePreferences(preferencePath, snapshot)
+    const indexToggled = snapshot.historyIndex !== preferences.historyIndex
+    // While recovery is pending the original file is preserved; changes apply to this run only.
+    if (preferenceState.writable) await writePreferences(preferencePath, snapshot)
     preferences = snapshot
-    nativeTheme.themeSource =
-      snapshot.theme === 'system'
-        ? 'system'
-        : ['moonlight', 'muse', 'plush'].includes(snapshot.theme)
-          ? 'dark'
-          : 'light'
-    emit({ type: 'preferences', preferences: snapshot })
+    preferenceState = { ...preferenceState, preferences: snapshot }
+    applyTheme()
+    if (indexToggled) await history.setEnabled(snapshot.historyIndex)
+    emit({ type: 'preferences', preferences: snapshot, recovery: preferenceState.recovery })
     return snapshot
   })
   preferenceWrites = write.then(
@@ -264,7 +310,35 @@ function setupIPC() {
   })
   handle('voice', (audio) => voice.transcribe(audio, preferences.cliPath))
   handle('cancel-voice', () => voice.cancel())
+  handle('recover-preferences', async (value) => {
+    const action = z.enum(['retry', 'reset', 'restore-backup', 'keep-recovered']).parse(value)
+    await preferenceWrites
+    preferenceState = await recoverPreferences(preferencePath, preferenceState, action)
+    preferences = preferenceState.preferences
+    applyTheme()
+    emit({ type: 'preferences', preferences, recovery: preferenceState.recovery })
+    return { preferences, recovery: preferenceState.recovery }
+  })
+  handle('drafts', () => ({ drafts: drafts.list(), notice: drafts.notice }))
+  handle('save-draft', async (key, value, immediate) => {
+    const draftKey = await knownDraftKey(key)
+    await drafts.set(
+      draftKey,
+      value === null ? null : draftInputSchema.parse(value),
+      z.boolean().optional().parse(immediate) === true,
+    )
+  })
+  handle('search-history', (query) =>
+    history.search(historySearchSchema.parse(query), preferences.archivedSessionIds),
+  )
+  handle('search-index-status', () => history.status())
+  handle('search-index-rebuild', () => history.rebuild())
+  handle('search-index-clear', () => history.clear())
+  handle('clear-drafts', async (keys) => {
+    await drafts.clear(z.array(draftKeySchema).max(500).optional().parse(keys))
+  })
   handle('bootstrap', () => ({
+    preferencesRecovery: preferenceState.recovery,
     preferences,
     status: muse.status,
     version: app.getVersion(),
@@ -347,8 +421,8 @@ function setupIPC() {
     await trustProject(root)
     return muse.create(root, z.string().optional().parse(modelId))
   })
-  handle('open', async (value) => {
-    const view = await muse.open(id.parse(value))
+  handle('open', async (value, refresh) => {
+    const view = await muse.open(id.parse(value), z.boolean().optional().parse(refresh) === true)
     if (
       view.session.workspaceRoot &&
       !preferences.recentProjects.includes(view.session.workspaceRoot)
@@ -369,7 +443,8 @@ function setupIPC() {
       .object({
         sessionId: id,
         text: z.string().max(200000),
-        attachments: z.array(id).max(5),
+        attachments: z.array(id).max(MAX_ATTACHMENTS),
+        attachmentScope: scopeSchema,
         effort: effortSchema,
         mode: z.enum(['queue', 'steer']),
       })
@@ -377,50 +452,22 @@ function setupIPC() {
     if (!input.text.trim() && !input.attachments.length)
       throw new Error('Write a message or attach a file first.')
     await sessionProject(input.sessionId)
-    const parts: Record<string, unknown>[] = [{ type: 'text', text: input.text }]
-    let bytes = Buffer.byteLength(input.text)
-    for (const attachmentId of input.attachments) {
-      const chosen = selectedFiles.get(attachmentId)
-      if (!chosen) throw new Error('An attachment expired. Select it again.')
-      const info = await stat(chosen.path)
-      if (info.size > 2 * 1024 * 1024) throw new Error('Attachments must be 2 MB or smaller.')
-      const data = await readFile(chosen.path)
-      bytes += data.length * 1.4
-      if (bytes > 4 * 1024 * 1024)
-        throw new Error('This message exceeds the 4 MB attachment limit.')
-      if (chosen.attachment.kind === 'image') {
-        const mediaTypes: Record<string, string> = {
-          '.png': 'image/png',
-          '.jpg': 'image/jpeg',
-          '.jpeg': 'image/jpeg',
-          '.webp': 'image/webp',
-          '.gif': 'image/gif',
-        }
-        parts.push({
-          type: 'image',
-          mediaType: mediaTypes[extname(chosen.path).toLowerCase()],
-          base64Data: data.toString('base64'),
-        })
-      } else {
-        if (data.includes(0))
-          throw new Error(
-            `${chosen.attachment.name} is a binary file. Attach an image or a text file.`,
-          )
-        if (data.length > 200 * 1024) throw new Error('Text attachments must be 200 KB or smaller.')
-        parts.push({
-          type: 'text',
-          text: `Attached file: ${chosen.attachment.name}\n\n${data.toString('utf8')}`,
-        })
-      }
-    }
-    const display = [
+    const { parts, display } = attachments.build(
+      input.attachmentScope,
+      input.attachments,
       input.text,
-      ...input.attachments.map(
-        (attachmentId) => `[Attached: ${selectedFiles.get(attachmentId)!.attachment.name}]`,
-      ),
-    ].join('\n')
-    await muse.send(input.sessionId, parts, input.effort, input.mode, display)
-    for (const attachmentId of input.attachments) selectedFiles.delete(attachmentId)
+    )
+    try {
+      const accepted = await muse.send(input.sessionId, parts, input.effort, input.mode, display)
+      attachments.release(input.attachments)
+      return { status: 'accepted', ...accepted } satisfies SendResult
+    } catch (error) {
+      // Failed sends keep their files; a new conversation's draft now belongs to that conversation.
+      attachments.rescope(input.attachments, input.attachmentScope, `session:${input.sessionId}`)
+      if (error instanceof SendOutcomeUnknownError)
+        return { status: 'uncertain', message: error.message } satisfies SendResult
+      return { status: 'rejected', message: messageOf(error) } satisfies SendResult
+    }
   })
   handle('cancel', (value) => muse.cancel(id.parse(value)))
   handle('rename', async (session, name) => {
@@ -449,31 +496,44 @@ function setupIPC() {
     await sessionProject(sessionId)
     return muse.cancelQuestion(sessionId, id.parse(question))
   })
-  handle('attachments', async () => {
+  handle('attachments', async (scope) => {
+    const draftScope = scopeSchema.parse(scope)
     const result = await dialog.showOpenDialog(window!, {
       title: 'Add context to your message',
       properties: ['openFile', 'multiSelections'],
     })
     if (result.canceled) return []
-    if (result.filePaths.length > 5) throw new Error('Select up to five files at a time.')
-    const attachments: Attachment[] = []
+    if (result.filePaths.length > MAX_ATTACHMENTS)
+      throw new Error('Select up to five files at a time.')
+    const files: AttachmentInput[] = []
     for (const path of result.filePaths) {
       const info = await stat(path)
-      if (!info.isFile() || info.size > 2 * 1024 * 1024)
-        throw new Error(`${basename(path)} must be a file smaller than 2 MB.`)
-      const attachment: Attachment = {
-        id: randomUUID(),
-        name: basename(path),
-        kind: /\.(png|jpe?g|webp|gif)$/i.test(path) ? 'image' : 'text',
-        size: info.size,
-      }
-      selectedFiles.set(attachment.id, { path, attachment })
-      attachments.push(attachment)
+      if (!info.isFile()) throw new Error(`${basename(path)} must be a file.`)
+      if (info.size > MAX_FILE_BYTES) throw new Error(`${basename(path)} must be 2 MB or smaller.`)
+      files.push({ name: basename(path), data: new Uint8Array(await readFile(path)) })
     }
-    return attachments
+    return attachments.stage(draftScope, files)
   })
+  handle('stage-attachments', (scope, files) =>
+    attachments.stage(
+      scopeSchema.parse(scope),
+      z
+        .array(
+          z.object({
+            name: z.string().min(1).max(1024),
+            data: z.custom<Uint8Array>(
+              (value) => value instanceof Uint8Array && value.byteLength <= MAX_FILE_BYTES,
+              'Attachments must be 2 MB or smaller.',
+            ),
+          }),
+        )
+        .min(1)
+        .max(MAX_ATTACHMENTS)
+        .parse(files),
+    ),
+  )
   handle('remove-attachment', (value) => {
-    selectedFiles.delete(id.parse(value))
+    attachments.remove(id.parse(value))
   })
   handle('git-status', async (project) => getGitStatus(await knownProject(project)))
   handle('git-diff', async (project, path) =>
@@ -575,6 +635,7 @@ function createWindow(iconPath: string) {
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => event.preventDefault())
+  window.webContents.on('did-start-loading', () => attachments.clear())
   window.webContents.on('will-attach-webview', (event) => event.preventDefault())
   window.webContents.session.setPermissionRequestHandler(
     (contents, permission, callback, details) => {
@@ -613,8 +674,9 @@ function createWindow(iconPath: string) {
 }
 
 function setupMenu() {
-  const action = (name: 'new' | 'open' | 'search' | 'settings' | 'sidebar') => () =>
-    emit({ type: 'menu', action: name })
+  const action =
+    (name: 'new' | 'open' | 'search' | 'settings' | 'sidebar' | 'find' | 'search-history') => () =>
+      emit({ type: 'menu', action: name })
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
@@ -662,6 +724,12 @@ function setupMenu() {
         label: 'View',
         submenu: [
           { label: 'Command menu', accelerator: 'CmdOrCtrl+K', click: action('search') },
+          { label: 'Find in conversation', accelerator: 'CmdOrCtrl+F', click: action('find') },
+          {
+            label: 'Search message history…',
+            accelerator: 'CmdOrCtrl+Shift+F',
+            click: action('search-history'),
+          },
           { label: 'Toggle sidebar', accelerator: 'CmdOrCtrl+B', click: action('sidebar') },
           { type: 'separator' },
           { role: 'resetZoom' },
@@ -728,7 +796,13 @@ else {
       if (response !== 0) return
     }
     quitting = true
-    void Promise.all([muse.close(), preferenceWrites, voice.cancel()]).then(
+    void Promise.all([
+      muse.close(),
+      preferenceWrites,
+      voice.cancel(),
+      drafts.flush(),
+      history.close(),
+    ]).then(
       () => app.quit(),
       (error: unknown) => {
         dialog.showErrorBox('Muse could not shut down cleanly', messageOf(error))
@@ -741,13 +815,11 @@ else {
     .then(async () => {
       app.setName('Muse Desktop')
       await mkdir(app.getPath('userData'), { recursive: true })
-      preferences = await readPreferences(preferencePath)
-      nativeTheme.themeSource =
-        preferences.theme === 'system'
-          ? 'system'
-          : ['moonlight', 'muse', 'plush'].includes(preferences.theme)
-            ? 'dark'
-            : 'light'
+      preferenceState = await loadPreferences(preferencePath)
+      preferences = preferenceState.preferences
+      await drafts.load()
+      await history.load()
+      applyTheme()
       const iconPath = app.isPackaged
         ? join(process.resourcesPath, 'app.asar/resources/icon.png')
         : resolve(directory, '../../resources/icon.png')
