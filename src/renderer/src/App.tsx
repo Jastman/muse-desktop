@@ -1,7 +1,7 @@
 import { Select } from './components/Select'
 import { isBackgroundOnly } from './activity'
 import { composerCommands, parseComposerCommand } from './commands'
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Archive,
   ArrowRight,
@@ -45,6 +45,8 @@ import {
 } from '../../shared/protocol'
 import { Composer, type SendState } from './components/Composer'
 import { PreferencesRecoveryBanner } from './components/RecoveryBanner'
+import { ActivityStrip } from './components/ActivityStrip'
+import { announcement, deriveActivity } from './agent-activity'
 import { newDraftKey, sessionDraftKey, useDrafts } from './controllers/drafts'
 import { CommandMenu } from './components/CommandMenu'
 import { Inspector } from './components/Inspector'
@@ -116,6 +118,8 @@ export function App() {
   const [loadingSession, setLoadingSession] = useState(false)
   const [sidebar, setSidebar] = useState(true)
   const [inspector, setInspector] = useState(false)
+  const [jumpRequest, setJumpRequest] = useState<{ itemId: string; nonce: number }>()
+  const [liveMessage, setLiveMessage] = useState('')
   const [settings, setSettings] = useState<'appearance' | 'connection' | false>(false)
   const [page, setPage] = useState<'chat' | 'projects' | 'files' | 'docs'>('chat')
   const [commands, setCommands] = useState(false)
@@ -143,6 +147,18 @@ export function App() {
   const modKey = platform === 'darwin' ? '⌘' : 'Ctrl'
   const altKey = platform === 'darwin' ? '⌥' : 'Alt+'
   const running = view?.session.status === 'running'
+  const activity = useMemo(() => deriveActivity(view, status), [view, status])
+  const spoken = announcement(activity)
+  const announcedFor = useRef<{ session?: string; text: string }>({ text: '' })
+  useEffect(() => {
+    const session = view?.session.sessionId
+    const previous = announcedFor.current
+    announcedFor.current = { session, text: spoken }
+    // Announce changes within one conversation only, never the state found when opening it.
+    if (!preferences?.announceUpdates || session !== previous.session || spoken === previous.text)
+      return
+    if (spoken) setLiveMessage(spoken)
+  }, [spoken, view?.session.sessionId, preferences?.announceUpdates])
 
   const showError = useCallback((message: string) => setToast({ message, kind: 'error' }), [])
   const drafts = useDrafts(showError)
@@ -559,6 +575,9 @@ export function App() {
       className={`app-shell ${sidebar ? '' : 'sidebar-hidden'} ${inspector ? 'with-inspector' : ''}`}
       style={{ '--background-presence': preferences.backgroundIntensity / 100 } as CSSProperties}
     >
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {liveMessage}
+      </div>
       {preferencesRecovery && (
         <PreferencesRecoveryBanner
           recovery={preferencesRecovery}
@@ -1049,7 +1068,12 @@ export function App() {
                 <p>Loading conversation…</p>
               </div>
             ) : view ? (
-              <Transcript key={view.session.sessionId} view={view} onError={showError} />
+              <Transcript
+                key={view.session.sessionId}
+                view={view}
+                onError={showError}
+                jumpRequest={jumpRequest}
+              />
             ) : (
               <div className="welcome">
                 <div className="welcome-content">
@@ -1110,6 +1134,14 @@ export function App() {
             )}
             {!loadingSession && (
               <div className={`composer-dock ${view ? 'conversation-dock' : ''}`}>
+                {view && (
+                  <ActivityStrip
+                    activity={activity}
+                    queued={view.queuedTurns}
+                    onJumpToItem={(itemId) => setJumpRequest({ itemId, nonce: Date.now() })}
+                    onReview={() => setInspector(true)}
+                  />
+                )}
                 <Composer
                   draft={draft}
                   setDraft={(value) => drafts.setText(draftKey, value)}

@@ -24,6 +24,10 @@ export const itemSchema = z.object({
   reminderAgentId: z.string().optional(),
   blocking: z.boolean().optional(),
   durationMs: z.number().optional(),
+  exitCode: z.number().optional(),
+  exitSignal: z.number().optional(),
+  failureKind: z.string().optional(),
+  approvalId: z.string().optional(),
   recordedAt: z.string().optional(),
   truncated: z.boolean().optional(),
   retracted: z.boolean().optional(),
@@ -209,6 +213,14 @@ export type SessionView = {
   cancelRequested?: boolean
   /** Follow-ups the CLI accepted with disposition `queued` and has not started yet. */
   queuedTurns?: { turnId: string; displayText: string }[]
+  /** The CLI scheduled a model retry (turn/retryScheduled); cleared by later progress or completion. */
+  retry?: {
+    nextAttempt: number
+    maxAttempts: number
+    retryDelayMs: number
+    reason: string
+    receivedAt: number
+  }
   /** Terminal state reported by the most recent turn/completed. */
   lastTurn?: { turnId?: string; terminal: string; durationMs?: number }
 }

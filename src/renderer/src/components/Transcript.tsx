@@ -25,6 +25,7 @@ import type {
   UserQuestion,
 } from '../../../shared/protocol'
 import { IconButton, MuseMark } from './Primitives'
+import { findItemElement, revealElement } from '../navigation'
 import { userMessageText } from '../message-text'
 
 function extractText(node: ReactNode): string {
@@ -127,7 +128,10 @@ function ToolItem({
     item.tool || item.label || item.role || item.kind.replace(/([A-Z])/g, ' $1').toLowerCase()
   const summary = item.statusLine || item.objective || item.commandText || item.fallbackText
   return (
-    <div className={`tool-item ${isRunning ? 'tool-running' : ''} ${open ? 'open' : ''}`}>
+    <div
+      className={`tool-item ${isRunning ? 'tool-running' : ''} ${open ? 'open' : ''}`}
+      data-item-id={item.itemId}
+    >
       <button
         type="button"
         className="tool-summary-button"
@@ -238,7 +242,11 @@ function ToolGroup({
     .slice(0, 3)
     .join(', ')
   return (
-    <div className={`tool-group ${open ? 'open' : ''}`}>
+    <div
+      className={`tool-group ${open ? 'open' : ''}`}
+      data-item-id={items[0].itemId}
+      data-item-ids={items.map((item) => item.itemId).join(' ')}
+    >
       <button
         type="button"
         className="tool-group-header"
@@ -281,7 +289,7 @@ function ReasoningItem({
 }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className={`reasoning-item ${open ? 'open' : ''}`}>
+    <div className={`reasoning-item ${open ? 'open' : ''}`} data-item-id={item.itemId}>
       <button
         type="button"
         className="reasoning-summary-button"
@@ -320,6 +328,15 @@ function formatArguments(raw: string) {
   }
 }
 
+function scopeText(scope: string, decision: string) {
+  const verb = decision.startsWith('denied') ? 'Denies' : 'Allows'
+  if (scope === 'once') return `${verb} this request only.`
+  if (scope === 'session') return `${verb} matching requests for the rest of this conversation.`
+  if (scope === 'localPersistent')
+    return `${verb} matching requests from now on by saving a local Muse Code rule.`
+  return `${verb} with scope “${scope}”, as defined by Muse Code.`
+}
+
 function ApprovalCard({
   approval,
   onError,
@@ -329,7 +346,12 @@ function ApprovalCard({
 }) {
   const [pending, setPending] = useState(false)
   return (
-    <section className="approval-card" aria-label="Approval required">
+    <section
+      className="approval-card"
+      aria-label="Approval required"
+      id={`request-${approval.approvalId}`}
+      tabIndex={-1}
+    >
       <div className="request-heading">
         <span className="request-icon">
           <ShieldCheck size={18} />
@@ -346,14 +368,24 @@ function ApprovalCard({
           approval.subject.target ||
           approval.rawArgs}
       </pre>
+      <ul className="approval-scopes" aria-label="What each choice allows">
+        {approval.availableChoices.map((choice) => (
+          <li key={choice.choiceId}>
+            <strong>{choice.label}</strong>: {scopeText(choice.scope, choice.decision)}
+            {choice.rulePreview && (
+              <>
+                {' '}
+                Rule: <code>{choice.rulePreview}</code>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
       <div className="approval-choices">
         {approval.availableChoices.map((choice) => (
           <button
             key={choice.choiceId}
-            title={
-              choice.rulePreview ||
-              `Applies ${choice.scope === 'once' ? 'once' : choice.scope === 'session' ? 'for this session' : 'as a saved policy'}`
-            }
+            title={choice.rulePreview || scopeText(choice.scope, choice.decision)}
             className={
               choice.decision.startsWith('approved') ? 'button primary' : 'button secondary'
             }
@@ -400,6 +432,8 @@ function QuestionCard({
   return (
     <form
       className="question-card"
+      id={`request-${request.userInputId}`}
+      tabIndex={-1}
       onSubmit={(event) => {
         event.preventDefault()
         setPending(true)
@@ -504,13 +538,26 @@ function QuestionCard({
 export function Transcript({
   view,
   onError,
+  jumpRequest,
 }: {
   view: SessionView
   onError: (message: string) => void
+  jumpRequest?: { itemId: string; nonce: number }
 }) {
   const scroller = useRef<HTMLDivElement>(null)
   const following = useRef(true)
   const [showJump, setShowJump] = useState(false)
+  useEffect(() => {
+    if (!jumpRequest || !scroller.current) return
+    const element = findItemElement(scroller.current, jumpRequest.itemId)
+    if (!element) return
+    following.current = false
+    setShowJump(true)
+    revealElement(element)
+    element.classList.add('jump-highlight')
+    const timer = setTimeout(() => element.classList.remove('jump-highlight'), 1600)
+    return () => clearTimeout(timer)
+  }, [jumpRequest])
   useEffect(() => {
     if (following.current && scroller.current)
       scroller.current.scrollTop = scroller.current.scrollHeight
@@ -571,7 +618,11 @@ export function Transcript({
               if (item.kind === 'userMessage') {
                 const userText = userMessageText(item)
                 return (
-                  <article key={item.itemId} className="message user-message">
+                  <article
+                    key={item.itemId}
+                    className="message user-message"
+                    data-item-id={item.itemId}
+                  >
                     <div className="message-heading">
                       <span className="avatar user-avatar">Y</span>
                       <strong>You</strong>
@@ -591,7 +642,11 @@ export function Transcript({
               }
               if (item.kind === 'agentMessage')
                 return (
-                  <article key={item.itemId} className="message agent-message">
+                  <article
+                    key={item.itemId}
+                    className="message agent-message"
+                    data-item-id={item.itemId}
+                  >
                     <div className="message-heading">
                       <span className="avatar muse-avatar">
                         <MuseMark size={26} />

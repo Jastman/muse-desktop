@@ -554,7 +554,11 @@ export function Composer({
                   note="Muse is still working on the current turn."
                   options={followUpOptions}
                 />
-                <IconButton label="Stop Muse" onClick={onCancel}>
+                <IconButton
+                  label={cancelRequested ? 'Stop requested' : 'Stop Muse'}
+                  onClick={onCancel}
+                  disabled={cancelRequested}
+                >
                   <Square size={14} fill="currentColor" />
                 </IconButton>
               </>

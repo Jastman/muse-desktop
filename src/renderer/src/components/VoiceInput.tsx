@@ -242,7 +242,7 @@ export function VoiceInput({
         )}
       </IconButton>
       {phase !== 'idle' && (
-        <div className="voice-status" role="status">
+        <div className="voice-status" role="status" aria-label="Voice input">
           {phase === 'recording' && (
             <span className="voice-waveform" aria-hidden="true">
               {levels.map((level, index) => (

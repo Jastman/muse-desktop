@@ -4057,3 +4057,110 @@ button.breadcrumb-segment:hover {
   align-items: center;
   font-size: var(--font-support);
 }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Persistent activity strip */
+.activity-strip {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--dialog);
+  font-size: var(--font-support);
+  color: var(--secondary-text);
+}
+.activity-strip.attention {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 1px var(--primary-border);
+  color: var(--text);
+}
+.activity-strip.warning {
+  border-color: var(--error-border);
+  background: var(--error-background);
+  color: var(--text);
+}
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.activity-label {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.activity-detail {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-detail code {
+  font-family: var(--font-family-code);
+  font-size: var(--font-caption);
+}
+.activity-meta {
+  color: var(--muted);
+  font-size: var(--font-caption);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.activity-action {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--strong-border);
+  font-size: var(--font-caption);
+  color: var(--text);
+}
+.activity-action:hover {
+  background: var(--hover);
+}
+.activity-output {
+  max-height: 180px;
+  overflow: auto;
+  margin: 2px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--soft-surface);
+  font-family: var(--font-family-code);
+  font-size: var(--font-caption);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.approval-scopes {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: var(--font-support);
+  color: var(--secondary-text);
+  display: grid;
+  gap: 4px;
+}
+.approval-scopes code {
+  overflow-wrap: anywhere;
+}
+.jump-highlight {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-strip .spin {
+    animation: none;
+  }
+}

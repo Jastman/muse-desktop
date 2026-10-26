@@ -100,15 +100,18 @@ export function Select({
         onKeyDown={(event) => {
           if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
             event.preventDefault()
+            const enabled = options
+              .map((option, position) => (option.disabled ? -1 : position))
+              .filter((position) => position >= 0)
+            if (!enabled.length) return
             const index =
               event.key === 'Home'
-                ? 0
+                ? enabled[0]
                 : event.key === 'End'
-                  ? options.length - 1
-                  : Math.max(
-                      0,
-                      Math.min(options.length - 1, active + (event.key === 'ArrowDown' ? 1 : -1)),
-                    )
+                  ? enabled[enabled.length - 1]
+                  : event.key === 'ArrowDown'
+                    ? (enabled.find((position) => position > active) ?? enabled[enabled.length - 1])
+                    : ([...enabled].reverse().find((position) => position < active) ?? enabled[0])
             if (open) setActive(index)
             else show(event.key === 'Home' || event.key === 'End' ? index : Math.max(0, selected))
           } else if (event.key === 'Enter' || event.key === ' ') {

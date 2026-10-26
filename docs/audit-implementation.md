@@ -100,16 +100,81 @@ unless they are marked as such.
   approvals, end with that process. The reopened conversation shows the CLI's stored history.
   No tool action or message is replayed.
 
-## Phases 2–7
+## Phase 2 — Transparent agent and composer UX
+
+### Activity strip
+
+- [x] `src/renderer/src/agent-activity.ts` derives one state from authoritative data only:
+      connection state, pending approvals and questions, `cancelRequested`,
+      `turn/retryScheduled`, the latest in-progress item, `turn/completed` (terminal and
+      duration), item `patchSummary`, and `userShell`/command `exitCode`/`exitSignal`. It never
+      reads model prose.
+- [x] `ActivityStrip` sits above the composer, so it stays visible when the transcript is
+      scrolled back. It shows:
+  - Reading, searching, editing, running a command (with elapsed time) or using a tool. Elapsed
+    time is measured from when the desktop first saw the item, because the protocol has no start
+    time for items, and is labelled as such.
+  - Expandable command output (the last 4,000 characters).
+  - "Show in conversation" jumps to the item.
+  - "Waiting for your approval" / "Muse has a question", with a button that scrolls to the request
+    and focuses its first control.
+  - A queued follow-up preview, connection interruptions, model retries, and "Stopping"
+    (requested) versus "Stopped" (confirmed).
+  - A finished summary: duration, files changed (from `patchSummary`), and commands run with their
+    real exit status. Commands without a reported exit code are counted as "without a reported
+    exit code" and never as passing. "No commands were run" is stated when that is the case.
+- [x] Polite live announcements (an `aria-live="polite"` region) for approvals, questions,
+      interruptions and turn completion only. They never fire for streamed tokens or for the
+      state found when a conversation is opened. They can be turned off with the
+      `announceUpdates` preference.
+- [x] Jumping respects reduced motion (instant scroll) and briefly highlights the target.
+
+### Approvals
+
+- [x] Each CLI-provided choice now lists its scope in visible text ("this request only", "the
+      rest of this conversation", "saving a local Muse Code rule") together with any
+      `rulePreview`. The choices themselves are unchanged and come from the CLI. Keying cards by
+      `approvalId` + `currentRequirementId.sourceIndex` (stale-approval protection) is preserved.
+
+### Composer
+
+- [x] See Phase 1 for the send lifecycle, chips, thumbnails, queue/steer wording and effort
+      capabilities. The stop button is disabled once stop is requested.
+- [x] Keyboard navigation in menus skips disabled (unsupported) options.
+
+### Deterministic fake CLI and E2E
+
+- `tests/fixtures/fake-muse/` is a protocol-level test double of `muse serve`. It is
+  deterministic, has no network access and needs no credentials. Scenario keywords (`[approval]`,
+  `[crash]`, `[slow]`, `[reject-send]`, …) are documented in its README. It is **not** a real
+  CLI integration test.
+- `tests/e2e/core.spec.ts` covers, against the fake CLI:
+  - faithful markup and a single `turn/start` per send
+  - drafts surviving restart, and a rejected send restoring the draft with no replay
+  - the approval jump and focus, plus keyboard approval
+  - a CLI crash mid-stream → interrupted → manual reconnect → authoritative history (the
+    uncommitted partial reply is gone) → follow-up works, with exactly two `turn/start` calls
+  - stop requested vs confirmed
+  - queued follow-up preview
+  - dropped **and** pasted images reaching the CLI with their exact byte count
+  - failed command exit codes in the summary, and survival of malformed events
+- `tests/e2e/desktop.spec.ts` was written for a real CLI with an echo provider (`MUSE_BIN`).
+  It now also passes against the fake CLI (`MUSE_BIN=tests/fixtures/fake-muse/muse`). Changes:
+  - It sets the `muse` theme explicitly, because new installs default to the quiet theme.
+  - Effort selection tolerates models that report a limited set of efforts.
+  - The fake CLI normalizes renamed session names to lowercase. The SDK documents the rename
+    result as a canonical, normalized name, and the existing test expects lowercase.
+
+## Phases 3–7
 
 Tracked in later commits of this branch.
 
-## Commands run for this phase
+## Commands run (latest phase)
 
-| Command                                                   | Result                 |
-| --------------------------------------------------------- | ---------------------- |
-| `npx tsc --noEmit`                                        | pass                   |
-| `npx vitest run`                                          | 8 files, 53 tests pass |
-| `npx electron-vite build`                                 | pass                   |
-| `xvfb-run -a npx playwright test tests/e2e/setup.spec.ts` | 2 passed               |
-| `npx prettier --check .`                                  | pass                   |
+| Command                                                                                                                              | Result                    |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| `npx tsc --noEmit`                                                                                                                   | pass                      |
+| `npx vitest run`                                                                                                                     | see the latest phase note |
+| `npx electron-vite build`                                                                                                            | pass                      |
+| `xvfb-run -a npx playwright test tests/e2e/setup.spec.ts tests/e2e/core.spec.ts`                                                     | 10 passed                 |
+| `MUSE_BIN=$PWD/tests/fixtures/fake-muse/muse FAKE_MUSE_NODE=$(which node) xvfb-run -a npx playwright test tests/e2e/desktop.spec.ts` | 10 passed                 |

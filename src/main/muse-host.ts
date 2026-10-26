@@ -508,6 +508,7 @@ export class MuseHost {
     if (!sessionId) return
     const live = this.sessions.get(sessionId)
     if (!live) return
+    if (method !== 'turn/retryScheduled' && method.startsWith('item/')) live.view.retry = undefined
     if (['item/started', 'item/updated', 'item/completed'].includes(method)) {
       const item = itemSchema.parse(params.item)
       live.store.apply(item)
@@ -523,6 +524,16 @@ export class MuseHost {
       live.view.session.activeTurnId = turnId
       live.view.session.status = 'running'
       live.view.queuedTurns = live.view.queuedTurns?.filter((turn) => turn.turnId !== turnId)
+    } else if (method === 'turn/retryScheduled') {
+      const retry = z
+        .object({
+          nextAttempt: z.number(),
+          maxAttempts: z.number(),
+          retryDelayMs: z.number(),
+          reason: z.string(),
+        })
+        .safeParse(params)
+      if (retry.success) live.view.retry = { ...retry.data, receivedAt: Date.now() }
     } else if (method === 'turn/unqueued') {
       live.view.queuedTurns = live.view.queuedTurns?.filter((turn) => turn.turnId !== params.turnId)
     } else if (method === 'turn/completed') {
@@ -532,6 +543,7 @@ export class MuseHost {
       const error = z.object({ message: z.string() }).optional().parse(params.error)
       live.view.error = error?.message
       live.view.cancelRequested = false
+      live.view.retry = undefined
       live.view.lastTurn = {
         turnId: typeof params.turnId === 'string' ? params.turnId : undefined,
         terminal: typeof params.terminal === 'string' ? params.terminal : 'completed',
