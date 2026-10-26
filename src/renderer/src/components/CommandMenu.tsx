@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useState } from 'react'
 import {
   ArrowUpRight,
+  ChevronsDown,
+  FileSearch,
+  TextSearch,
   FolderOpen,
   Leaf,
   MessageSquare,
@@ -15,6 +18,18 @@ import {
 import type { MuseSession, Theme } from '../../../shared/protocol'
 import { Dialog, projectName, sessionTitle } from './Primitives'
 
+const SESSION_PAGE = 50
+type Command = {
+  id: string
+  group: string
+  title: string
+  subtitle: string
+  icon: typeof Search
+  shortcut: string
+  action: () => void
+  keepOpen?: boolean
+}
+
 export function CommandMenu({
   platform = 'darwin',
   sessions,
@@ -24,6 +39,10 @@ export function CommandMenu({
   onSettings,
   onTheme,
   onClose,
+  onSearchHistory,
+  onFind,
+  hasMoreSessions = false,
+  onLoadMoreSessions,
 }: {
   platform?: string
   sessions: MuseSession[]
@@ -33,11 +52,40 @@ export function CommandMenu({
   onSettings: () => void
   onTheme: (theme: Theme) => void
   onClose: () => void
+  onSearchHistory: (query: string) => void
+  onFind?: () => void
+  hasMoreSessions?: boolean
+  onLoadMoreSessions?: () => void
 }) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
+  const [visibleSessions, setVisibleSessions] = useState(SESSION_PAGE)
   const modKey = platform === 'darwin' ? '⌘' : 'Ctrl'
-  const commands = [
+  const needle = query.trim().toLowerCase()
+  const matches = (title: string, subtitle: string) =>
+    `${title} ${subtitle}`.toLowerCase().includes(needle)
+  const matchingSessions = sessions.filter((session) =>
+    matches(
+      sessionTitle(session),
+      session.workspaceRoot ? projectName(session.workspaceRoot) : 'Conversation',
+    ),
+  )
+  const hiddenSessions = Math.max(0, matchingSessions.length - visibleSessions)
+  const commands: Command[] = [
+    ...(needle
+      ? [
+          {
+            id: 'search-history',
+            group: 'Search',
+            title: `Search messages for “${query.trim()}”`,
+            subtitle: 'Full-text search across indexed conversation history',
+            icon: TextSearch,
+            shortcut: `${modKey} ⇧ F`,
+            action: () => onSearchHistory(query.trim()),
+            keepOpen: false,
+          },
+        ]
+      : []),
     {
       id: 'new',
       group: 'Actions',
@@ -65,15 +113,64 @@ export function CommandMenu({
       shortcut: `${modKey} ,`,
       action: onSettings,
     },
-    ...sessions.map((session) => ({
+    {
+      id: 'history-search',
+      group: 'Actions',
+      title: 'Search message history',
+      subtitle: 'Find text inside past conversations',
+      icon: TextSearch,
+      shortcut: `${modKey} ⇧ F`,
+      action: () => onSearchHistory(''),
+    },
+    ...(onFind
+      ? [
+          {
+            id: 'find',
+            group: 'Actions',
+            title: 'Find in conversation',
+            subtitle: 'Search the open conversation',
+            icon: FileSearch,
+            shortcut: `${modKey} F`,
+            action: onFind,
+          },
+        ]
+      : []),
+    ...matchingSessions.slice(0, visibleSessions).map((session) => ({
       id: session.sessionId,
-      group: 'Recent conversations',
+      group: 'Conversations',
       title: sessionTitle(session),
       subtitle: session.workspaceRoot ? projectName(session.workspaceRoot) : 'Conversation',
       icon: MessageSquare,
       shortcut: '',
       action: () => onSession(session.sessionId),
     })),
+    ...(hiddenSessions
+      ? [
+          {
+            id: 'more-sessions',
+            group: 'Conversations',
+            title: `Show ${Math.min(SESSION_PAGE, hiddenSessions)} more of ${hiddenSessions} matching conversations`,
+            subtitle: 'Titles and project names',
+            icon: ChevronsDown,
+            shortcut: '',
+            action: () => setVisibleSessions((count) => count + SESSION_PAGE),
+            keepOpen: true,
+          },
+        ]
+      : hasMoreSessions && onLoadMoreSessions
+        ? [
+            {
+              id: 'older-sessions',
+              group: 'Conversations',
+              title: 'Load older conversations',
+              subtitle: 'Fetch the next page from Muse Code',
+              icon: ChevronsDown,
+              shortcut: '',
+              action: onLoadMoreSessions,
+              keepOpen: true,
+            },
+          ]
+        : []),
     {
       id: 'muse',
       group: 'Themes',
@@ -119,11 +216,12 @@ export function CommandMenu({
       shortcut: '',
       action: () => onTheme('plush'),
     },
-  ]
-    .filter((entry) =>
-      `${entry.title} ${entry.subtitle}`.toLowerCase().includes(query.toLowerCase()),
-    )
-    .slice(0, 30)
+  ].filter(
+    (entry) =>
+      entry.group === 'Conversations' ||
+      entry.group === 'Search' ||
+      matches(entry.title, entry.subtitle),
+  )
   useEffect(() => {
     const active = commands[selected]
     if (active) {
@@ -132,10 +230,9 @@ export function CommandMenu({
   }, [selected, commands])
   const invoke = (index: number) => {
     const command = commands[index]
-    if (command) {
-      onClose()
-      command.action()
-    }
+    if (!command) return
+    if (!command.keepOpen) onClose()
+    command.action()
   }
   return (
     <Dialog title="Search" onClose={onClose} className="command-dialog">
@@ -144,11 +241,19 @@ export function CommandMenu({
         <input
           autoFocus
           value={query}
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="command-results"
+          aria-autocomplete="list"
+          aria-activedescendant={
+            commands[selected] ? `cmd-item-${commands[selected].id}` : undefined
+          }
           aria-label="Search commands and conversations"
-          placeholder="Search commands and conversations…"
+          placeholder="Search commands and conversation titles…"
           onChange={(event) => {
             setQuery(event.target.value)
             setSelected(0)
+            setVisibleSessions(SESSION_PAGE)
           }}
           onKeyDown={(event) => {
             if (event.key === 'ArrowDown') {
@@ -159,6 +264,8 @@ export function CommandMenu({
               event.preventDefault()
               setSelected((value) => Math.max(0, value - 1))
             }
+            if (event.key === 'Home' && event.ctrlKey) setSelected(0)
+            if (event.key === 'End' && event.ctrlKey) setSelected(commands.length - 1)
             if (event.key === 'Enter') {
               event.preventDefault()
               invoke(selected)
@@ -166,14 +273,19 @@ export function CommandMenu({
           }}
         />
       </div>
-      <div className="command-results">
+      <div className="command-results" id="command-results" role="listbox" aria-label="Results">
         {commands.map((command, i) => (
           <Fragment key={command.id}>
             {(i === 0 || commands[i - 1].group !== command.group) && (
-              <div className="command-group-heading">{command.group}</div>
+              <div className="command-group-heading" role="presentation">
+                {command.group}
+              </div>
             )}
             <button
               id={`cmd-item-${command.id}`}
+              role="option"
+              aria-selected={i === selected}
+              tabIndex={-1}
               className={i === selected ? 'selected' : ''}
               onClick={() => invoke(i)}
               onMouseEnter={() => setSelected(i)}
@@ -188,7 +300,9 @@ export function CommandMenu({
           </Fragment>
         ))}
         {!commands.length && (
-          <div className="command-empty">No matches. Try a project or conversation name.</div>
+          <div className="command-empty" role="status">
+            No matches. Try a project or conversation name.
+          </div>
         )}
       </div>
       <footer>

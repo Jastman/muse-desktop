@@ -25,7 +25,7 @@ import type {
   UserQuestion,
 } from '../../../shared/protocol'
 import { IconButton, MuseMark } from './Primitives'
-import { findItemElement, revealElement } from '../navigation'
+import { findItemElement, prefersReducedMotion, revealElement } from '../navigation'
 import { userMessageText } from '../message-text'
 
 function extractText(node: ReactNode): string {
@@ -535,6 +535,8 @@ function QuestionCard({
   )
 }
 
+export type JumpRequest = { itemId: string; nonce: number; focus?: boolean; sessionId?: string }
+
 export function Transcript({
   view,
   onError,
@@ -542,22 +544,33 @@ export function Transcript({
 }: {
   view: SessionView
   onError: (message: string) => void
-  jumpRequest?: { itemId: string; nonce: number }
+  jumpRequest?: JumpRequest
 }) {
   const scroller = useRef<HTMLDivElement>(null)
   const following = useRef(true)
+  const handledJump = useRef<number>(undefined)
   const [showJump, setShowJump] = useState(false)
+  // A jump stays pending until its item is rendered (e.g. history is still loading after a search
+  // result opened the conversation); it is handled at most once per request.
   useEffect(() => {
-    if (!jumpRequest || !scroller.current) return
+    if (!jumpRequest || handledJump.current === jumpRequest.nonce || !scroller.current) return
+    if (jumpRequest.sessionId && jumpRequest.sessionId !== view.session.sessionId) return
     const element = findItemElement(scroller.current, jumpRequest.itemId)
     if (!element) return
+    handledJump.current = jumpRequest.nonce
     following.current = false
     setShowJump(true)
+    if (jumpRequest.focus === false) {
+      element.scrollIntoView({
+        block: 'center',
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      })
+      return
+    }
     revealElement(element)
     element.classList.add('jump-highlight')
-    const timer = setTimeout(() => element.classList.remove('jump-highlight'), 1600)
-    return () => clearTimeout(timer)
-  }, [jumpRequest])
+    setTimeout(() => element.classList.remove('jump-highlight'), 1600)
+  }, [jumpRequest, view])
   useEffect(() => {
     if (following.current && scroller.current)
       scroller.current.scrollTop = scroller.current.scrollHeight
@@ -707,7 +720,10 @@ export function Transcript({
           label="Jump to latest message"
           onClick={() => {
             following.current = true
-            scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' })
+            scroller.current?.scrollTo({
+              top: scroller.current.scrollHeight,
+              behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+            })
             setShowJump(false)
           }}
         >

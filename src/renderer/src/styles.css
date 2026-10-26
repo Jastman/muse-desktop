@@ -4164,3 +4164,181 @@ button.breadcrumb-segment:hover {
     animation: none;
   }
 }
+
+/* History search */
+.history-dialog {
+  width: 720px;
+  max-width: calc(100vw - 60px);
+  margin-top: min(12vh, 100px);
+}
+.history-dialog .dialog-heading {
+  display: none;
+}
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 21px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-support);
+  color: var(--secondary-text);
+}
+.history-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.history-filters select,
+.history-filters input[type='date'] {
+  background: var(--soft-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font: inherit;
+}
+.history-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 21px;
+  font-size: var(--font-caption);
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+.history-coverage .history-error {
+  color: var(--red, #c0392b);
+}
+.history-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 8px;
+}
+.history-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--secondary-text);
+}
+.history-actions button:hover {
+  color: var(--text);
+}
+.history-results {
+  max-height: 420px;
+}
+.history-hit > svg {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.history-snippet {
+  display: block;
+  margin-top: 6px;
+  font-size: var(--font-support);
+  color: var(--secondary-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.history-snippet mark,
+.find-bar mark {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+.history-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+.history-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 19px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-caption);
+  color: var(--muted);
+}
+.history-more {
+  color: var(--accent);
+  font-weight: 500;
+}
+.settings-status {
+  font-size: var(--font-support);
+  color: var(--muted);
+}
+
+/* In-conversation find */
+.find-bar {
+  position: absolute;
+  top: 10px;
+  right: 22px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--dialog);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  color: var(--muted);
+}
+.find-bar input {
+  width: 220px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-ui);
+  padding: 3px 0;
+  box-shadow: none;
+}
+.find-count {
+  min-width: 64px;
+  font-size: var(--font-caption);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+::highlight(find-match) {
+  background-color: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+::highlight(find-current) {
+  background-color: #ffd54a;
+  color: #111;
+}
+.find-current-item {
+  outline: 2px solid #e0a800;
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+.sidebar-search:has(.search-messages-button) {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.sidebar-search .search-button {
+  flex: 1;
+  min-width: 0;
+}
+.search-messages-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  border-radius: 8px;
+  color: var(--secondary-text);
+}
+.search-messages-button:hover {
+  background: var(--selected);
+  color: var(--text);
+}

@@ -24,6 +24,7 @@ import {
   preferencesPatchSchema,
   preferencesSchema,
   draftKeySchema,
+  historySearchSchema,
   storedDraftSchema,
   type AppEvent,
   type AttachmentInput,
@@ -38,6 +39,7 @@ import {
   type PreferencesState,
 } from './preferences'
 import { DraftStore } from './drafts'
+import { HistorySearchService } from './history-search'
 import { getGitDiff, getGitStatus } from './git'
 import { listProjectFiles, readProjectFile } from './files'
 import { AttachmentStore, MAX_ATTACHMENTS, MAX_FILE_BYTES } from './attachments'
@@ -102,9 +104,21 @@ function emit(event: AppEvent) {
     previousStatuses.set(session.sessionId, session.status)
     setUpdaterBusy([...previousStatuses.values()].some((status) => status === 'running'))
   }
+  if (event.type === 'connection' && event.status.state === 'ready') history.schedule(1500)
+  if (event.type === 'sessions-changed') history.schedule()
   if (window && !window.isDestroyed()) window.webContents.send('muse:event', event)
 }
 const muse = new MuseHost(emit)
+const history = new HistorySearchService({
+  path: join(app.getPath('userData'), 'search-index.json'),
+  source: {
+    listPage: (cursor) => muse.list(cursor),
+    readSession: (sessionId) => muse.readHistory(sessionId),
+  },
+  enabled: () => Boolean(preferences?.historyIndex),
+  connected: () => muse.status.state === 'ready',
+  onStatus: (status) => emit({ type: 'search-index', status }),
+})
 const voice = new VoiceTranscriber()
 let microphoneEnabled = false
 
@@ -159,11 +173,13 @@ async function knownDraftKey(value: unknown) {
 async function savePreferences(patch: Partial<Preferences>) {
   const write = preferenceWrites.then(async () => {
     const snapshot = preferencesSchema.parse({ ...preferences, ...patch })
+    const indexToggled = snapshot.historyIndex !== preferences.historyIndex
     // While recovery is pending the original file is preserved; changes apply to this run only.
     if (preferenceState.writable) await writePreferences(preferencePath, snapshot)
     preferences = snapshot
     preferenceState = { ...preferenceState, preferences: snapshot }
     applyTheme()
+    if (indexToggled) await history.setEnabled(snapshot.historyIndex)
     emit({ type: 'preferences', preferences: snapshot, recovery: preferenceState.recovery })
     return snapshot
   })
@@ -312,6 +328,12 @@ function setupIPC() {
       z.boolean().optional().parse(immediate) === true,
     )
   })
+  handle('search-history', (query) =>
+    history.search(historySearchSchema.parse(query), preferences.archivedSessionIds),
+  )
+  handle('search-index-status', () => history.status())
+  handle('search-index-rebuild', () => history.rebuild())
+  handle('search-index-clear', () => history.clear())
   handle('clear-drafts', async (keys) => {
     await drafts.clear(z.array(draftKeySchema).max(500).optional().parse(keys))
   })
@@ -652,8 +674,9 @@ function createWindow(iconPath: string) {
 }
 
 function setupMenu() {
-  const action = (name: 'new' | 'open' | 'search' | 'settings' | 'sidebar') => () =>
-    emit({ type: 'menu', action: name })
+  const action =
+    (name: 'new' | 'open' | 'search' | 'settings' | 'sidebar' | 'find' | 'search-history') => () =>
+      emit({ type: 'menu', action: name })
   Menu.setApplicationMenu(
     Menu.buildFromTemplate([
       {
@@ -701,6 +724,12 @@ function setupMenu() {
         label: 'View',
         submenu: [
           { label: 'Command menu', accelerator: 'CmdOrCtrl+K', click: action('search') },
+          { label: 'Find in conversation', accelerator: 'CmdOrCtrl+F', click: action('find') },
+          {
+            label: 'Search message history…',
+            accelerator: 'CmdOrCtrl+Shift+F',
+            click: action('search-history'),
+          },
           { label: 'Toggle sidebar', accelerator: 'CmdOrCtrl+B', click: action('sidebar') },
           { type: 'separator' },
           { role: 'resetZoom' },
@@ -767,7 +796,13 @@ else {
       if (response !== 0) return
     }
     quitting = true
-    void Promise.all([muse.close(), preferenceWrites, voice.cancel(), drafts.flush()]).then(
+    void Promise.all([
+      muse.close(),
+      preferenceWrites,
+      voice.cancel(),
+      drafts.flush(),
+      history.close(),
+    ]).then(
       () => app.quit(),
       (error: unknown) => {
         dialog.showErrorBox('Muse could not shut down cleanly', messageOf(error))
@@ -783,6 +818,7 @@ else {
       preferenceState = await loadPreferences(preferencePath)
       preferences = preferenceState.preferences
       await drafts.load()
+      await history.load()
       applyTheme()
       const iconPath = app.isPackaged
         ? join(process.resourcesPath, 'app.asar/resources/icon.png')

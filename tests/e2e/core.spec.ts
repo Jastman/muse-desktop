@@ -73,7 +73,8 @@ test('a CLI crash mid-stream reconnects without replaying the send', async () =>
     const strip = page.getByLabel('Muse activity')
     await expect(strip).toContainText('Connection interrupted')
     await page.locator('.connection-banner').getByRole('button', { name: 'Reconnect' }).click()
-    await expect(strip).not.toContainText('Connection interrupted')
+    // After recovery the strip either shows another state or is hidden while idle.
+    await expect(page.getByText('Connection interrupted')).toHaveCount(0)
     // The reopened conversation comes from durable CLI history: the user message survives and the
     // partial reply that was never committed is gone. Nothing is resent.
     await expect(page.locator('.user-message-text')).toHaveText('stream then [crash]')

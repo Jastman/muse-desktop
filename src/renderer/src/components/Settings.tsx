@@ -15,8 +15,15 @@ import {
   ShieldCheck,
   Terminal,
 } from 'lucide-react'
-import type { ConnectionStatus, Preferences, Theme, UpdateStatus } from '../../../shared/protocol'
+import type {
+  ConnectionStatus,
+  Preferences,
+  SearchIndexStatus,
+  Theme,
+  UpdateStatus,
+} from '../../../shared/protocol'
 import { Dialog, MuseMark } from './Primitives'
+import { coverageText } from './HistorySearch'
 
 export const themes: { id: Theme; label: string; description: string; icon: typeof Sun }[] = [
   { id: 'muse', label: 'Muse', description: 'Electric blue', icon: Palette },
@@ -325,6 +332,7 @@ export function Settings({
                   </button>
                 )}
               </section>
+              <HistoryIndexSettings preferences={preferences} onSave={onSave} onError={onError} />
             </div>
           )}
           {tab === 'about' && (
@@ -463,6 +471,90 @@ function UpdateSettings({
         </label>
       )}
       {status?.message && <p className="field-hint">{status.message}</p>}
+    </section>
+  )
+}
+
+function HistoryIndexSettings({
+  preferences,
+  onSave,
+  onError,
+}: {
+  preferences: Preferences
+  onSave: (patch: Partial<Preferences>) => void
+  onError: (message: string) => void
+}) {
+  const [status, setStatus] = useState<SearchIndexStatus | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+  useEffect(() => {
+    void window.muse.searchIndexStatus().then(setStatus, () => undefined)
+    return window.muse.onEvent((event) => {
+      if (event.type === 'search-index') setStatus(event.status)
+    })
+  }, [])
+  const act = (action: () => Promise<SearchIndexStatus>) =>
+    void action().then(setStatus, (error: Error) => onError(error.message))
+  const limits = status?.coverage.limits
+  return (
+    <section className="settings-group" aria-labelledby="history-index-heading">
+      <h3 id="history-index-heading">Message history search</h3>
+      <p>
+        Muse Desktop keeps a local, rebuildable search index of message text read from Muse Code
+        history. Muse Code remains the source of truth; the index never claims conversations, and
+        searching never contacts a model or the network.
+        {limits &&
+          ` Up to ${limits.maxSessions.toLocaleString()} conversations and ${limits.maxItemsPerSession.toLocaleString()} messages per conversation are indexed; longer messages are indexed up to ${limits.maxCharsPerItem.toLocaleString()} characters.`}
+      </p>
+      <label className="setting-row">
+        <div>
+          <span className="setting-label">Index message history</span>
+          <small>Turning this off deletes the index.</small>
+        </div>
+        <input
+          className="switch"
+          type="checkbox"
+          checked={preferences.historyIndex}
+          onChange={(event) => onSave({ historyIndex: event.target.checked })}
+        />
+      </label>
+      <p className="settings-status" role="status">
+        {coverageText(status)}
+        {status?.lastError ? ` · Last error: ${status.lastError}` : ''}
+      </p>
+      {preferences.historyIndex && (
+        <div className="settings-inline-actions">
+          <button
+            className="button secondary"
+            onClick={() => act(() => window.muse.rebuildSearchIndex())}
+          >
+            Rebuild index
+          </button>
+          {confirmClear ? (
+            <>
+              <span>
+                Delete the index? It is rebuilt when conversations next change or when you choose
+                Rebuild.
+              </span>
+              <button
+                className="button secondary"
+                onClick={() => {
+                  act(() => window.muse.clearSearchIndex())
+                  setConfirmClear(false)
+                }}
+              >
+                Delete index
+              </button>
+              <button className="text-button" onClick={() => setConfirmClear(false)}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button className="button secondary" onClick={() => setConfirmClear(true)}>
+              Clear index…
+            </button>
+          )}
+        </div>
+      )}
     </section>
   )
 }

@@ -252,6 +252,17 @@ export class MuseHost {
   private async hydrate(result: z.infer<typeof sessionResultSchema>, loaded: boolean) {
     const live = this.seed(result, loaded)
     if (result.history?.mode !== 'none') return live
+    await this.pageHistory(result.session.sessionId, result.viewCursor, live.store)
+    live.view.historyNotice = undefined
+    return live
+  }
+
+  /** Folds durable history pages into a store up to the head cursor read with the session. */
+  private async pageHistory(
+    sessionId: string,
+    headCursor: string | undefined,
+    store: ItemStore<TranscriptItem>,
+  ) {
     const cursors = new Set<string>()
     let cursor: string | undefined
     let reachedHead = false
@@ -268,24 +279,24 @@ export class MuseHost {
         })
         .parse(
           await this.connection.request('view/page', {
-            sessionId: result.session.sessionId,
+            sessionId: sessionId,
             direction: 'forward',
             limit: 500,
             ...(cursor ? { cursor } : {}),
           }),
         )
       for (const event of page.events) {
-        if (event.params.sessionId !== result.session.sessionId)
+        if (event.params.sessionId !== sessionId)
           throw new Error('Muse returned history for a different conversation.')
         if (['item/started', 'item/updated', 'item/completed'].includes(event.method))
-          live.store.apply(itemSchema.parse(event.params.item))
+          store.apply(itemSchema.parse(event.params.item))
         if (event.method === 'item/delta') {
           const delta = z
             .object({ itemId: z.string(), delta: z.string(), field: z.string().optional() })
             .parse(event.params)
-          live.store.applyDelta(delta.itemId, delta.delta, delta.field)
+          store.applyDelta(delta.itemId, delta.delta, delta.field)
         }
-        if (event.params.viewCursor === result.viewCursor) {
+        if (event.params.viewCursor === headCursor) {
           reachedHead = true
           break
         }
@@ -295,8 +306,22 @@ export class MuseHost {
         throw new Error('Muse returned a repeated transcript cursor. Reconnect and try again.')
       if (cursor) cursors.add(cursor)
     } while (cursor && !reachedHead)
-    live.view.historyNotice = undefined
-    return live
+  }
+
+  /**
+   * Reads a conversation's durable history without loading, subscribing to or claiming it.
+   * Used by the local search index; the CLI stays the source of truth.
+   */
+  async readHistory(sessionId: string): Promise<{ items: TranscriptItem[]; partial: boolean }> {
+    const live = this.sessions.get(sessionId)
+    if (live?.loaded) return { items: [...live.store.list()], partial: false }
+    const result = sessionResultSchema.parse(
+      await this.connection.request('session/read', { sessionId, excludeItems: false }),
+    )
+    const store = new ItemStore<TranscriptItem>()
+    store.seed(result.history?.items ?? result.history?.snapshot?.state.items ?? [])
+    if (result.history?.mode === 'none') await this.pageHistory(sessionId, result.viewCursor, store)
+    return { items: [...store.list()], partial: false }
   }
 
   private async refreshPending(sessionId: string) {

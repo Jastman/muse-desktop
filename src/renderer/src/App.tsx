@@ -29,6 +29,7 @@ import {
   SquarePen,
   Sparkles,
   X,
+  TextSearch,
 } from 'lucide-react'
 import {
   preferencesSchema,
@@ -59,7 +60,9 @@ import {
   sessionTitle,
 } from './components/Primitives'
 import { Settings, themes } from './components/Settings'
-import { Transcript } from './components/Transcript'
+import { Transcript, type JumpRequest } from './components/Transcript'
+import { HistorySearch } from './components/HistorySearch'
+import { FindBar } from './components/FindBar'
 import { DocsPage, FilesPage, ProjectsPage } from './components/WorkspacePages'
 
 const starters = [
@@ -118,7 +121,9 @@ export function App() {
   const [loadingSession, setLoadingSession] = useState(false)
   const [sidebar, setSidebar] = useState(true)
   const [inspector, setInspector] = useState(false)
-  const [jumpRequest, setJumpRequest] = useState<{ itemId: string; nonce: number }>()
+  const [jumpRequest, setJumpRequest] = useState<JumpRequest>()
+  const [historySearch, setHistorySearch] = useState<{ query: string } | null>(null)
+  const [finding, setFinding] = useState(0)
   const [liveMessage, setLiveMessage] = useState('')
   const [settings, setSettings] = useState<'appearance' | 'connection' | false>(false)
   const [page, setPage] = useState<'chat' | 'projects' | 'files' | 'docs'>('chat')
@@ -353,21 +358,26 @@ export function App() {
     if (action === 'new') startNew()
     if (action === 'open') void chooseProject()
     if (action === 'search') setCommands(true)
+    if (action === 'search-history') setHistorySearch({ query: '' })
+    if (action === 'find' && view && page === 'chat') setFinding((value) => value + 1)
     if (action === 'settings') setSettings('appearance')
     if (action === 'sidebar') setSidebar((value) => !value)
   }
   useEffect(() => {
     if (platform === 'darwin') return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return
       const key = event.key.toLowerCase()
-      const actions: Record<string, string> = {
-        n: 'new',
-        o: 'open',
-        k: 'search',
-        ',': 'settings',
-        b: 'sidebar',
-      }
+      const actions: Record<string, string> = event.shiftKey
+        ? { f: 'search-history' }
+        : {
+            n: 'new',
+            o: 'open',
+            k: 'search',
+            f: 'find',
+            ',': 'settings',
+            b: 'sidebar',
+          }
       const action = actions[key]
       if (!action) return
       event.preventDefault()
@@ -651,6 +661,14 @@ export function App() {
             </span>
             <span>Search conversations</span>
             <kbd>{modKey} K</kbd>
+          </button>
+          <button
+            className="search-messages-button"
+            aria-label="Search messages"
+            data-tooltip={`Search messages (${modKey} ⇧ F)`}
+            onClick={() => setHistorySearch({ query: '' })}
+          >
+            <TextSearch size={15} />
           </button>
         </div>
         <nav className="main-nav" aria-label="Main navigation">
@@ -1068,12 +1086,30 @@ export function App() {
                 <p>Loading conversation…</p>
               </div>
             ) : view ? (
-              <Transcript
-                key={view.session.sessionId}
-                view={view}
-                onError={showError}
-                jumpRequest={jumpRequest}
-              />
+              <>
+                {finding > 0 && (
+                  <FindBar
+                    key={`find:${view.session.sessionId}`}
+                    focusSignal={finding}
+                    items={view.items}
+                    onReveal={(itemId) =>
+                      setJumpRequest({
+                        itemId,
+                        sessionId: view.session.sessionId,
+                        nonce: Date.now(),
+                        focus: false,
+                      })
+                    }
+                    onClose={() => setFinding(0)}
+                  />
+                )}
+                <Transcript
+                  key={view.session.sessionId}
+                  view={view}
+                  onError={showError}
+                  jumpRequest={jumpRequest}
+                />
+              </>
             ) : (
               <div className="welcome">
                 <div className="welcome-content">
@@ -1232,6 +1268,25 @@ export function App() {
           onSettings={() => setSettings('appearance')}
           onTheme={(theme) => savePreferences({ theme })}
           onClose={() => setCommands(false)}
+          onSearchHistory={(query) => setHistorySearch({ query })}
+          onFind={view && page === 'chat' ? () => setFinding((value) => value + 1) : undefined}
+        />
+      )}
+      {historySearch && (
+        <HistorySearch
+          initialQuery={historySearch.query}
+          projects={[
+            ...new Set(
+              sessions
+                .map((session) => session.workspaceRoot)
+                .filter((root): root is string => Boolean(root)),
+            ),
+          ]}
+          onClose={() => setHistorySearch(null)}
+          onOpen={(hit) => {
+            setJumpRequest({ itemId: hit.itemId, sessionId: hit.sessionId, nonce: Date.now() })
+            void openSession(hit.sessionId)
+          }}
         />
       )}
       {rename && view && (

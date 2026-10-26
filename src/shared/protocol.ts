@@ -282,8 +282,39 @@ export type AppEvent =
   | { type: 'session'; view: SessionView }
   | { type: 'sessions-changed' }
   | { type: 'preferences'; preferences: Preferences; recovery?: PreferencesRecovery }
-  | { type: 'menu'; action: 'new' | 'open' | 'search' | 'settings' | 'sidebar' }
+  | {
+      type: 'menu'
+      action: 'new' | 'open' | 'search' | 'settings' | 'sidebar' | 'find' | 'search-history'
+    }
   | { type: 'error'; message: string }
+  | { type: 'search-index'; status: SearchIndexStatus }
+
+export type { SearchHit, SearchResult, IndexCoverage } from '../main/search-index'
+import type { IndexCoverage, SearchResult } from '../main/search-index'
+export type SearchIndexStatus = {
+  enabled: boolean
+  coverage: IndexCoverage
+  /** Listing or persistence problem from the last build, shown verbatim. */
+  lastError: string | null
+  /** False when the last build could not list every CLI conversation. */
+  listingComplete: boolean
+}
+const isoDate = z
+  .string()
+  .max(40)
+  .refine((value) => !Number.isNaN(Date.parse(value)), 'Invalid date')
+export const historySearchSchema = z
+  .object({
+    text: z.string().max(500),
+    project: z.string().max(4096).nullable().optional(),
+    from: isoDate.optional(),
+    to: isoDate.optional(),
+    includeArchived: z.boolean(),
+    offset: z.number().int().min(0).max(1_000_000),
+    limit: z.number().int().min(1).max(100),
+  })
+  .strict()
+export type HistorySearch = z.infer<typeof historySearchSchema>
 
 export const answerSchema = z.object({
   questionId: z.string(),
@@ -315,6 +346,10 @@ export interface DesktopAPI {
   listDrafts(): Promise<{ drafts: StoredDraft[]; notice?: string }>
   saveDraft(key: string, draft: DraftInput | null, immediate?: boolean): Promise<void>
   clearDrafts(keys?: string[]): Promise<void>
+  searchHistory(query: HistorySearch): Promise<SearchResult>
+  searchIndexStatus(): Promise<SearchIndexStatus>
+  rebuildSearchIndex(): Promise<SearchIndexStatus>
+  clearSearchIndex(): Promise<SearchIndexStatus>
   listSessions(cursor?: string): Promise<{ sessions: MuseSession[]; nextCursor: string | null }>
   createSession(project: string, modelId?: string): Promise<SessionView>
   openSession(sessionId: string, refresh?: boolean): Promise<SessionView>
