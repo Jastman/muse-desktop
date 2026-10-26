@@ -1,3 +1,4 @@
+import { APP_VERSION } from '../shared/version'
 import { ItemStore, MspError, spawnMspConnection, type SpawnedMspConnection } from '@muse-code/sdk'
 import { z } from 'zod'
 import {
@@ -78,7 +79,7 @@ export class MuseHost {
       try {
         this.host = await Promise.race([
           handshake.initialize({
-            clientInfo: { name: 'muse_desktop', title: 'Muse Desktop', version: '0.2.0' },
+            clientInfo: { name: 'muse_desktop', title: 'Muse Desktop', version: APP_VERSION },
             capabilities: { userInputDialogs: true, requestedCapabilities: ['sessionListStream'] },
           }),
           new Promise<never>((_, reject) => {

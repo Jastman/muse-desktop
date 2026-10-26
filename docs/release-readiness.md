@@ -1,3 +1,29 @@
+# Release candidate 0.3.0-rc.1 — readiness (unsigned, NOT production ready)
+
+Status: **unsigned testable release candidate.** It is not a signed, notarized or published
+release, and no tag, release or merge has been made. Details and exact command results are in
+[audit-implementation](audit-implementation.md#commands-run-030-rc1-linux-x64-node-22233-electron-447).
+
+| Gate                                                | State                                                                                            |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Typecheck, unit tests (111), formatting, build      | Passed on Linux x64                                                                              |
+| Fake-CLI Electron E2E (14) + `desktop.spec.ts` (10) | Passed on Linux/Xvfb only; macOS/Windows CI configured, not yet observed                         |
+| Real Muse CLI integration                           | **Not performed** (CLI not installed here)                                                       |
+| Long-history performance                            | Data path measured (`docs/performance.md`); **render/memory not measured**; not virtualized      |
+| Version metadata consistent (0.3.0-rc.1)            | Yes: package, lockfile, MSP client info, packaged asar                                           |
+| Unsigned Linux package                              | `electron-builder --linux --dir` built; installer/AppImage and Windows/macOS packages left to CI |
+| Signing, notarization, Sparkle update install       | **Not performed**; needs maintainer secrets. Appcasts still point to 0.2.0 and were not changed  |
+| Screen reader, microphone, native OS manual tests   | **Not performed**                                                                                |
+| Roadmap phases 4–7 remainder                        | **Incomplete**; see the status table in audit-implementation                                     |
+
+Fork identity risk: this fork's `package.json` author, appcast/update URLs and Sparkle key still
+reference the upstream maintainer. Do not ship updates from the fork until that is decided.
+
+To reproduce an unsigned build: `npm ci && npm run typecheck && npm test && npm run package:linux`
+(or `package:win` on Windows, `package:unsigned` on macOS); CI uploads `unsigned-*` artifacts.
+
+---
+
 # Release verification — 0.2.0
 
 Verified October 13, 2026, on Apple Silicon with Muse Code 1.4.7 and SDK 1.4.7. Targets: macOS 13+ (Apple Silicon and Intel), Windows 10/11 (x64 and arm64), and Linux (x64 and arm64).

@@ -10,7 +10,7 @@ import { sessionTitle } from '../../src/renderer/src/components/Primitives'
 describe('user message text', () => {
   it('renders displayText verbatim, including HTML, XML and code', () => {
     const displayText =
-      'Why does <div class="a"><span>x</span></div> collapse?\n```xml\n<config><item id="1"/></config>\n```\n<system-reminder>typed by me</system-reminder>'
+      'Why does <div class="a"><span>x</span></div> collapse?\n```xml\n<config><item id="1"/></config>\n```\n<runtime_info>typed by me</runtime_info>'
     expect(userMessageText({ displayText, text: 'model-visible text' })).toBe(displayText)
   })
 
@@ -30,31 +30,39 @@ describe('user message text', () => {
   it('removes only allow-listed protocol metadata at the edges of raw text', () => {
     expect(
       userMessageText({
-        text: '<system-reminder>\nInternal note\n</system-reminder>\nPlease explain <b>bold</b>',
+        text: '<runtime_info>\nInternal note\n</runtime_info>\nPlease explain <b>bold</b>',
       }),
     ).toBe('Please explain <b>bold</b>')
     expect(
       stripProtocolMetadata(
-        '<environment_context><cwd>/x</cwd></environment_context>\n<user_instructions>be nice</user_instructions>\nhello',
+        '<runtime_info><cwd>/x</cwd></runtime_info>\n<pull_request_linking>link it</pull_request_linking>\nhello',
       ),
     ).toBe('hello')
-    expect(stripProtocolMetadata('hello\n<system-reminder attr="1">x</system-reminder>')).toBe(
-      'hello',
-    )
+    expect(stripProtocolMetadata('hello\n<runtime_info attr="1">x</runtime_info>')).toBe('hello')
   })
 
   it('preserves allow-listed tag names when they appear inside the user prompt body', () => {
-    const text = 'How do I parse <system-reminder>x</system-reminder> blocks in my parser?'
+    const text = 'How do I parse <runtime_info>x</runtime_info> blocks in my parser?'
     expect(userMessageText({ text })).toBe(text)
   })
 
   it('does not remove unterminated or unknown tags', () => {
-    expect(stripProtocolMetadata('<system-reminder>never closed')).toBe(
-      '<system-reminder>never closed',
-    )
+    expect(stripProtocolMetadata('<runtime_info>never closed')).toBe('<runtime_info>never closed')
     expect(stripProtocolMetadata('<context>user wrote this</context>')).toBe(
       '<context>user wrote this</context>',
     )
+  })
+
+  it('never strips look-alike tags without verified protocol provenance', () => {
+    for (const tag of [
+      'system-reminder',
+      'environment_context',
+      'user_instructions',
+      'command-name',
+    ]) {
+      const text = `<${tag}>typed by the user</${tag}>\nPlease help`
+      expect(userMessageText({ text })).toBe(text)
+    }
   })
 
   it('falls back to raw text when displayText is empty', () => {
@@ -66,9 +74,9 @@ describe('user message text', () => {
     expect(sessionTitle({ firstUserPrompt: '<Button> props are wrong' })).toBe(
       '<Button> props are wrong',
     )
-    expect(
-      sessionTitle({ firstUserPrompt: '<system-reminder>meta</system-reminder>Real prompt' }),
-    ).toBe('Real prompt')
+    expect(sessionTitle({ firstUserPrompt: '<runtime_info>meta</runtime_info>Real prompt' })).toBe(
+      'Real prompt',
+    )
   })
 
   it('keeps internal activity classification unchanged', () => {

@@ -20,8 +20,10 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - run: npm run package:unsigned
-      - name: Verify setup without an installed CLI
-        run: npx playwright test tests/e2e/setup.spec.ts
+      - name: Deterministic fake-CLI end-to-end tests
+        run: npx playwright test tests/e2e/setup.spec.ts tests/e2e/core.spec.ts tests/e2e/search.spec.ts
+      - name: Transcript data-path benchmark
+        run: npm run benchmark
       - name: Preserve executable permissions in the app archive
         run: |
           for app in release/mac*/Muse\ Desktop.app; do
@@ -59,7 +61,22 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - run: npm run format:check
       - run: npm test
+      - name: Deterministic fake-CLI end-to-end tests (Linux, under Xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npx playwright test tests/e2e/setup.spec.ts tests/e2e/core.spec.ts tests/e2e/search.spec.ts
+      - name: Deterministic fake-CLI end-to-end tests (Windows)
+        if: runner.os == 'Windows'
+        run: npx playwright test tests/e2e/setup.spec.ts tests/e2e/core.spec.ts tests/e2e/search.spec.ts
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-traces-${{ matrix.os }}
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
       - run: npm run ${{ matrix.script }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

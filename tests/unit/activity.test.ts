@@ -32,7 +32,7 @@ it('strips harness metadata tags from conversation titles and user messages', ()
   ).toBe('I want you to do a thorough dive on this Harness Terminal.')
   expect(
     userMessageText({
-      text: '<system-reminder>Internal note</system-reminder>First line\nSecond line',
+      text: '<runtime_info>Internal note</runtime_info>First line\nSecond line',
     }),
   ).toBe('First line\nSecond line')
   expect(sessionTitle({ firstUserPrompt: '<runtime_info>unclosed metadata only' })).toBe(
