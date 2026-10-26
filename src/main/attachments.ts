@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
-import type { Attachment, AttachmentInput } from '../shared/protocol'
+import { attachmentLimits, type Attachment, type AttachmentInput } from '../shared/protocol'
 
-export const MAX_ATTACHMENTS = 5
-export const MAX_FILE_BYTES = 2 * 1024 * 1024
-export const MAX_TEXT_BYTES = 200 * 1024
-export const MAX_MESSAGE_BYTES = 4 * 1024 * 1024
+export const MAX_ATTACHMENTS = attachmentLimits.count
+export const MAX_FILE_BYTES = attachmentLimits.fileBytes
+export const MAX_TEXT_BYTES = attachmentLimits.textBytes
+export const MAX_MESSAGE_BYTES = attachmentLimits.messageBytes
 const MAX_STAGED = 25
 // Encoded payloads are larger than the raw bytes; keep the original 1.4x allowance.
 const encodedSize = (bytes: number) => bytes * 1.4
@@ -59,8 +59,7 @@ export class AttachmentStore {
     for (const file of files) {
       const name = cleanName(file.name)
       if (file.data.byteLength === 0) throw new Error(`${name} is empty.`)
-      if (file.data.byteLength > MAX_FILE_BYTES)
-        throw new Error(`${name} must be 2 MB or smaller.`)
+      if (file.data.byteLength > MAX_FILE_BYTES) throw new Error(`${name} must be 2 MB or smaller.`)
       const data = Buffer.from(file.data)
       weight += encodedSize(data.length)
       if (weight > MAX_MESSAGE_BYTES)
@@ -68,12 +67,17 @@ export class AttachmentStore {
       const mediaType = sniffImage(data)
       if (!mediaType) {
         if (data.includes(0))
-          throw new Error(`${name} is not a supported image or text file. Binary files are rejected.`)
-        if (data.length > MAX_TEXT_BYTES) throw new Error(`${name} must be 200 KB or smaller as text.`)
+          throw new Error(
+            `${name} is not a supported image or text file. Binary files are rejected.`,
+          )
+        if (data.length > MAX_TEXT_BYTES)
+          throw new Error(`${name} must be 200 KB or smaller as text.`)
         try {
           new TextDecoder('utf-8', { fatal: true }).decode(data)
         } catch {
-          throw new Error(`${name} is not a supported image or text file. Binary files are rejected.`)
+          throw new Error(
+            `${name} is not a supported image or text file. Binary files are rejected.`,
+          )
         }
       }
       prepared.push({
@@ -111,7 +115,8 @@ export class AttachmentStore {
       if (!entry) throw new Error('An attachment expired. Select it again.')
       if (entry.scope !== scope) throw new Error('An attachment belongs to a different draft.')
       weight += encodedSize(entry.data.length)
-      if (weight > MAX_MESSAGE_BYTES) throw new Error('This message exceeds the 4 MB attachment limit.')
+      if (weight > MAX_MESSAGE_BYTES)
+        throw new Error('This message exceeds the 4 MB attachment limit.')
       if (entry.mediaType)
         parts.push({
           type: 'image',

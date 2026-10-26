@@ -379,7 +379,7 @@ const guides = [
   {
     title: 'Add context',
     detail:
-      'Attach images or text files using the paperclip. Select up to five files, 2 MB per file and 4 MB total; text files are limited to 200 KB. The Files tab can add a relative file reference to your message. Muse reads that project file using its own tools and permissions.',
+      'Attach images or text files using the paperclip, by dragging them into the composer, or by pasting an image. Add up to five files, 2 MB per file and 4 MB total; text files are limited to 200 KB. The Files tab can add a relative file reference to your message. Muse reads that project file using its own tools and permissions.',
   },
   {
     title: 'Customize your workspace',

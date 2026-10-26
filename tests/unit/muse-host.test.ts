@@ -28,6 +28,7 @@ vi.mock('@muse-code/sdk', async (importOriginal) => ({
     }),
   }),
 }))
+import { MspError } from '@muse-code/sdk'
 import { MuseHost } from '../../src/main/muse-host'
 
 const session = {
@@ -284,6 +285,92 @@ describe('Muse protocol boundary', () => {
       { sessionId: 's1' },
       { maxAttempts: 1 },
     )
+    await host.close()
+  })
+
+  it('rehydrates an already-cached session after reconnect without resuming or replaying', async () => {
+    const host = new MuseHost(() => {})
+    const first = await host.connect('')
+    await host.create('/project')
+    const item = {
+      itemId: 'fresh',
+      kind: 'agentMessage',
+      revision: 1,
+      status: 'completed',
+      text: 'Fresh',
+    }
+    wire.request.mockImplementation(async (method: string) =>
+      method === 'approval/listPending'
+        ? { approvals: [approval], userInputs: [] }
+        : result([item]),
+    )
+    const second = await host.connect('')
+    expect(second.epoch).toBe((first.epoch ?? 0) + 1)
+    wire.command.mockClear()
+    const view = await host.open('s1', true)
+    expect(view.items[0].text).toBe('Fresh')
+    expect(view.approvals).toHaveLength(1)
+    expect(wire.command).not.toHaveBeenCalled()
+    await host.close()
+  })
+
+  it('forces an authoritative reread of a loaded session and restores its pending requests', async () => {
+    const host = new MuseHost(() => {})
+    await host.connect('')
+    await host.create('/project')
+    const item = {
+      itemId: 'new',
+      kind: 'agentMessage',
+      revision: 1,
+      status: 'completed',
+      text: 'Server copy',
+    }
+    wire.request.mockImplementation(async (method: string) =>
+      method === 'approval/listPending'
+        ? { approvals: [approval], userInputs: [] }
+        : result([item]),
+    )
+    expect((await host.open('s1')).items).toHaveLength(0)
+    const view = await host.open('s1', true)
+    expect(view.items[0].text).toBe('Server copy')
+    expect(view.approvals).toHaveLength(1)
+    await host.close()
+  })
+
+  it('does not claim an unloaded session or list its approvals when viewing it', async () => {
+    const host = new MuseHost(() => {})
+    await host.connect('')
+    wire.request.mockImplementation(async (method: string) => {
+      if (method === 'view/subscribe')
+        throw new MspError({
+          code: -32000,
+          message: 'not loaded',
+          data: { kind: 'sessionNotLoaded' },
+        })
+      return result()
+    })
+    await host.open('s1', true)
+    expect(wire.command).not.toHaveBeenCalled()
+    expect(wire.request).not.toHaveBeenCalledWith('approval/listPending', expect.anything())
+    await host.close()
+  })
+
+  it('rejects a stale open that finishes after the connection was replaced', async () => {
+    const host = new MuseHost(() => {})
+    await host.connect('')
+    let release = () => {}
+    wire.request.mockImplementation(async (method: string) => {
+      if (method === 'session/read') await new Promise<void>((resolve) => (release = resolve))
+      return result()
+    })
+    const stale = host.open('s1', true)
+    await vi.waitFor(() =>
+      expect(wire.request).toHaveBeenCalledWith('session/read', expect.anything()),
+    )
+    wire.request.mockImplementation(async () => result())
+    await host.connect('')
+    release()
+    await expect(stale).rejects.toThrow('connection changed')
     await host.close()
   })
 })
