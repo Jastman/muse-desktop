@@ -12,10 +12,9 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron'
 import { execFile, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, extname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { z } from 'zod'
@@ -25,13 +24,14 @@ import {
   preferencesPatchSchema,
   preferencesSchema,
   type AppEvent,
-  type Attachment,
+  type AttachmentInput,
   type Preferences,
 } from '../shared/protocol'
 import { MuseHost, messageOf } from './muse-host'
 import { readPreferences, writePreferences } from './preferences'
 import { getGitDiff, getGitStatus } from './git'
 import { listProjectFiles, readProjectFile } from './files'
+import { AttachmentStore, MAX_ATTACHMENTS, MAX_FILE_BYTES } from './attachments'
 import { VoiceTranscriber } from './voice'
 import {
   initializeUpdates,
@@ -64,7 +64,8 @@ let preferences: Preferences
 let window: BrowserWindow | undefined
 let quitting = false
 let preferenceWrites: Promise<void> = Promise.resolve()
-const selectedFiles = new Map<string, { attachment: Attachment; path: string }>()
+const attachments = new AttachmentStore()
+const scopeSchema = z.string().min(1).max(4200)
 const previousStatuses = new Map<string, string>()
 
 function emit(event: AppEvent) {
@@ -347,8 +348,8 @@ function setupIPC() {
     await trustProject(root)
     return muse.create(root, z.string().optional().parse(modelId))
   })
-  handle('open', async (value) => {
-    const view = await muse.open(id.parse(value))
+  handle('open', async (value, refresh) => {
+    const view = await muse.open(id.parse(value), z.boolean().optional().parse(refresh) === true)
     if (
       view.session.workspaceRoot &&
       !preferences.recentProjects.includes(view.session.workspaceRoot)
@@ -369,7 +370,8 @@ function setupIPC() {
       .object({
         sessionId: id,
         text: z.string().max(200000),
-        attachments: z.array(id).max(5),
+        attachments: z.array(id).max(MAX_ATTACHMENTS),
+        attachmentScope: scopeSchema,
         effort: effortSchema,
         mode: z.enum(['queue', 'steer']),
       })
@@ -377,50 +379,13 @@ function setupIPC() {
     if (!input.text.trim() && !input.attachments.length)
       throw new Error('Write a message or attach a file first.')
     await sessionProject(input.sessionId)
-    const parts: Record<string, unknown>[] = [{ type: 'text', text: input.text }]
-    let bytes = Buffer.byteLength(input.text)
-    for (const attachmentId of input.attachments) {
-      const chosen = selectedFiles.get(attachmentId)
-      if (!chosen) throw new Error('An attachment expired. Select it again.')
-      const info = await stat(chosen.path)
-      if (info.size > 2 * 1024 * 1024) throw new Error('Attachments must be 2 MB or smaller.')
-      const data = await readFile(chosen.path)
-      bytes += data.length * 1.4
-      if (bytes > 4 * 1024 * 1024)
-        throw new Error('This message exceeds the 4 MB attachment limit.')
-      if (chosen.attachment.kind === 'image') {
-        const mediaTypes: Record<string, string> = {
-          '.png': 'image/png',
-          '.jpg': 'image/jpeg',
-          '.jpeg': 'image/jpeg',
-          '.webp': 'image/webp',
-          '.gif': 'image/gif',
-        }
-        parts.push({
-          type: 'image',
-          mediaType: mediaTypes[extname(chosen.path).toLowerCase()],
-          base64Data: data.toString('base64'),
-        })
-      } else {
-        if (data.includes(0))
-          throw new Error(
-            `${chosen.attachment.name} is a binary file. Attach an image or a text file.`,
-          )
-        if (data.length > 200 * 1024) throw new Error('Text attachments must be 200 KB or smaller.')
-        parts.push({
-          type: 'text',
-          text: `Attached file: ${chosen.attachment.name}\n\n${data.toString('utf8')}`,
-        })
-      }
-    }
-    const display = [
+    const { parts, display } = attachments.build(
+      input.attachmentScope,
+      input.attachments,
       input.text,
-      ...input.attachments.map(
-        (attachmentId) => `[Attached: ${selectedFiles.get(attachmentId)!.attachment.name}]`,
-      ),
-    ].join('\n')
+    )
     await muse.send(input.sessionId, parts, input.effort, input.mode, display)
-    for (const attachmentId of input.attachments) selectedFiles.delete(attachmentId)
+    attachments.release(input.attachments)
   })
   handle('cancel', (value) => muse.cancel(id.parse(value)))
   handle('rename', async (session, name) => {
@@ -449,31 +414,44 @@ function setupIPC() {
     await sessionProject(sessionId)
     return muse.cancelQuestion(sessionId, id.parse(question))
   })
-  handle('attachments', async () => {
+  handle('attachments', async (scope) => {
+    const draftScope = scopeSchema.parse(scope)
     const result = await dialog.showOpenDialog(window!, {
       title: 'Add context to your message',
       properties: ['openFile', 'multiSelections'],
     })
     if (result.canceled) return []
-    if (result.filePaths.length > 5) throw new Error('Select up to five files at a time.')
-    const attachments: Attachment[] = []
+    if (result.filePaths.length > MAX_ATTACHMENTS)
+      throw new Error('Select up to five files at a time.')
+    const files: AttachmentInput[] = []
     for (const path of result.filePaths) {
       const info = await stat(path)
-      if (!info.isFile() || info.size > 2 * 1024 * 1024)
-        throw new Error(`${basename(path)} must be a file smaller than 2 MB.`)
-      const attachment: Attachment = {
-        id: randomUUID(),
-        name: basename(path),
-        kind: /\.(png|jpe?g|webp|gif)$/i.test(path) ? 'image' : 'text',
-        size: info.size,
-      }
-      selectedFiles.set(attachment.id, { path, attachment })
-      attachments.push(attachment)
+      if (!info.isFile()) throw new Error(`${basename(path)} must be a file.`)
+      if (info.size > MAX_FILE_BYTES) throw new Error(`${basename(path)} must be 2 MB or smaller.`)
+      files.push({ name: basename(path), data: new Uint8Array(await readFile(path)) })
     }
-    return attachments
+    return attachments.stage(draftScope, files)
   })
+  handle('stage-attachments', (scope, files) =>
+    attachments.stage(
+      scopeSchema.parse(scope),
+      z
+        .array(
+          z.object({
+            name: z.string().min(1).max(1024),
+            data: z.custom<Uint8Array>(
+              (value) => value instanceof Uint8Array && value.byteLength <= MAX_FILE_BYTES,
+              'Attachments must be 2 MB or smaller.',
+            ),
+          }),
+        )
+        .min(1)
+        .max(MAX_ATTACHMENTS)
+        .parse(files),
+    ),
+  )
   handle('remove-attachment', (value) => {
-    selectedFiles.delete(id.parse(value))
+    attachments.remove(id.parse(value))
   })
   handle('git-status', async (project) => getGitStatus(await knownProject(project)))
   handle('git-diff', async (project, path) =>
@@ -575,6 +553,7 @@ function createWindow(iconPath: string) {
   })
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => event.preventDefault())
+  window.webContents.on('did-start-loading', () => attachments.clear())
   window.webContents.on('will-attach-webview', (event) => event.preventDefault())
   window.webContents.session.setPermissionRequestHandler(
     (contents, permission, callback, details) => {

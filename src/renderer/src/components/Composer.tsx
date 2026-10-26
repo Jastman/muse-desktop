@@ -10,12 +10,13 @@ import {
   Square,
   X,
 } from 'lucide-react'
-import type {
-  Attachment,
-  MuseModel,
-  Preferences,
-  ProjectFile,
-  ReasoningEffort,
+import {
+  attachmentLimits,
+  type Attachment,
+  type MuseModel,
+  type Preferences,
+  type ProjectFile,
+  type ReasoningEffort,
 } from '../../../shared/protocol'
 import { IconButton } from './Primitives'
 import { Select } from './Select'
@@ -47,6 +48,9 @@ export function Composer({
   preferences,
   onModel,
   onEffort,
+  draftKey,
+  attachments,
+  onAttachments,
   onSubmit,
   onCancel,
   onError,
@@ -64,6 +68,9 @@ export function Composer({
   preferences: Preferences
   onModel: (id: string) => void
   onEffort: (effort: ReasoningEffort) => void
+  draftKey: string
+  attachments: Attachment[]
+  onAttachments: (key: string, update: (current: Attachment[]) => Attachment[]) => void
   onSubmit: (attachments: Attachment[], mode: 'queue' | 'steer') => Promise<boolean>
   onCancel: () => void
   onError: (message: string) => void
@@ -130,7 +137,6 @@ export function Composer({
   }, [draft])
   const latestDraft = useRef(draft)
   latestDraft.current = draft
-  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [mode, setMode] = useState<'queue' | 'steer'>('queue')
   const textarea = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
@@ -147,16 +153,38 @@ export function Composer({
       (!draft.trim() && !attachments.length)
     )
       return
-    if (await onSubmit(attachments, mode)) setAttachments([])
+    await onSubmit(attachments, mode)
+  }
+  const addFiles = async (files: File[]) => {
+    const key = draftKey
+    try {
+      if (files.length > attachmentLimits.count)
+        throw new Error(`You can attach up to ${attachmentLimits.count} files per message.`)
+      const large = files.find((file) => file.size > attachmentLimits.fileBytes)
+      if (large) throw new Error(`${large.name || 'This file'} must be 2 MB or smaller.`)
+      const inputs = await Promise.all(
+        files.map(async (file) => {
+          const name = file.name || 'pasted-image'
+          try {
+            return { name, data: new Uint8Array(await file.arrayBuffer()) }
+          } catch {
+            throw new Error(
+              `Could not read ${name}. Folders and unreadable files cannot be attached.`,
+            )
+          }
+        }),
+      )
+      const added = await window.muse.stageAttachments(key, inputs)
+      onAttachments(key, (current) => [...current, ...added])
+    } catch (error) {
+      onError(error instanceof Error ? error.message : String(error))
+    }
   }
   const attach = async () => {
+    const key = draftKey
     try {
-      const files = await window.muse.chooseAttachments()
-      if (attachments.length + files.length > 5) {
-        await Promise.all(files.map((file) => window.muse.removeAttachment(file.id)))
-        throw new Error('You can attach up to five files per message.')
-      }
-      setAttachments((current) => [...current, ...files])
+      const files = await window.muse.chooseAttachments(key)
+      onAttachments(key, (current) => [...current, ...files])
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error))
     }
@@ -235,31 +263,7 @@ export function Composer({
           event.preventDefault()
           setDragging(false)
           const dropped = Array.from(event.dataTransfer.files)
-          if (!dropped.length) return
-          void (async () => {
-            const additions: string[] = []
-            for (const file of dropped.slice(0, 5)) {
-              if (file.size <= 120 * 1024 && !/\.(png|jpe?g|webp|gif|pdf|zip)$/i.test(file.name)) {
-                try {
-                  const content = await file.text()
-                  if (!content.includes('\0')) {
-                    additions.push(`\`\`\`${file.name}\n${content.trim()}\n\`\`\``)
-                    continue
-                  }
-                } catch {
-                  // Fall back to file name reference.
-                }
-              }
-              additions.push(`@${file.name}`)
-            }
-            if (additions.length) {
-              const current = latestDraft.current
-              setDraft(
-                `${current}${current && !/\s$/.test(current) ? '\n' : ''}${additions.join('\n')}\n`,
-              )
-              textarea.current?.focus()
-            }
-          })()
+          if (dropped.length) void addFiles(dropped)
         }}
         onSubmit={(event) => {
           event.preventDefault()
@@ -279,7 +283,9 @@ export function Composer({
                     void window.muse
                       .removeAttachment(file.id)
                       .catch((error: Error) => onError(error.message))
-                    setAttachments((current) => current.filter((entry) => entry.id !== file.id))
+                    onAttachments(draftKey, (current) =>
+                      current.filter((entry) => entry.id !== file.id),
+                    )
                   }}
                 >
                   <X size={12} />
@@ -298,6 +304,14 @@ export function Composer({
           placeholder={hasProject ? 'Ask Muse about your project…' : 'Ask Muse anything…'}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
+          onPaste={(event) => {
+            const images = Array.from(event.clipboardData.files).filter((file) =>
+              file.type.startsWith('image/'),
+            )
+            if (!images.length || event.clipboardData.types.includes('text/plain')) return
+            event.preventDefault()
+            void addFiles(images)
+          }}
           rows={2}
           spellCheck
           onKeyDown={(event) => {

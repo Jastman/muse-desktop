@@ -94,6 +94,8 @@ function conversationGroup(session: MuseSession, pinned: string[]) {
   return date >= week ? 'Previous 7 days' : 'Earlier'
 }
 
+const noAttachments: Attachment[] = []
+
 export function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => preferencesSchema.parse({}))
   const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting' })
@@ -108,6 +110,7 @@ export function App() {
   const [models, setModels] = useState<MuseModel[]>([])
   const [modelId, setModelId] = useState('')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, Attachment[]>>({})
   const [submitting, setSubmitting] = useState(false)
   const [loadingSession, setLoadingSession] = useState(false)
   const [sidebar, setSidebar] = useState(true)
@@ -126,6 +129,9 @@ export function App() {
     window.matchMedia('(prefers-color-scheme: dark)').matches,
   )
   const activeId = useRef<string | null>(null)
+  const statusRef = useRef(status)
+  statusRef.current = status
+  const reconnectSequence = useRef(0)
   const openSequence = useRef(0)
   const historySequence = useRef(0)
   const hasLoadedHistory = useRef(false)
@@ -263,15 +269,15 @@ export function App() {
       showError(error instanceof Error ? error.message : String(error))
     }
   }
-  const openSession = async (sessionId: string) => {
+  const openSession = async (sessionId: string, force = false) => {
     setPage('chat')
-    if (activeId.current === sessionId && view?.session.sessionId === sessionId) return
+    if (!force && activeId.current === sessionId && view?.session.sessionId === sessionId) return
     const sequence = ++openSequence.current
-    const showSpinner = !view
+    const showSpinner = !view && !force
     if (showSpinner) setLoadingSession(true)
     activeId.current = sessionId
     try {
-      const opened = await window.muse.openSession(sessionId)
+      const opened = await window.muse.openSession(sessionId, force)
       if (openSequence.current !== sequence) return
       setView(opened)
       setProject(opened.session.workspaceRoot || '')
@@ -279,21 +285,24 @@ export function App() {
     } catch (error) {
       if (openSequence.current === sequence) {
         showError(error instanceof Error ? error.message : String(error))
-        activeId.current = view?.session.sessionId || null
+        activeId.current = force ? sessionId : view?.session.sessionId || null
       }
     } finally {
       if (openSequence.current === sequence) setLoadingSession(false)
     }
   }
   const reconnect = () => {
+    const sequence = ++reconnectSequence.current
+    const previousEpoch = statusRef.current.epoch
     void window.muse
       .connect()
       .then((result) => {
+        if (reconnectSequence.current !== sequence) return
         setStatus(result)
-        if (result.state === 'ready') {
-          const sessionId = activeId.current
-          if (sessionId) void openSession(sessionId)
-        }
+        // A cancelled confirmation returns the unchanged connection; only a new host needs rehydration.
+        if (result.state !== 'ready' || result.epoch === previousEpoch) return
+        const sessionId = activeId.current
+        if (sessionId) void openSession(sessionId, true)
       })
       .catch((error: Error) => showError(error.message))
   }
@@ -441,9 +450,17 @@ export function App() {
         sessionId: current.session.sessionId,
         text,
         attachments: attachments.map((file) => file.id),
+        attachmentScope: key,
         effort: preferences.reasoningEffort,
         mode,
       })
+      if (attachments.length) {
+        const sent = new Set(attachments.map((file) => file.id))
+        setAttachmentDrafts((values) => ({
+          ...values,
+          [key]: (values[key] || []).filter((file) => !sent.has(file.id)),
+        }))
+      }
       return true
     } catch (error) {
       setDrafts((values) => ({ ...values, [key]: values[key] || text }))
@@ -1059,6 +1076,14 @@ export function App() {
                   preferences={preferences}
                   onModel={setModel}
                   onEffort={(reasoningEffort) => savePreferences({ reasoningEffort })}
+                  draftKey={draftKey}
+                  attachments={attachmentDrafts[draftKey] || noAttachments}
+                  onAttachments={(key, update) =>
+                    setAttachmentDrafts((current) => ({
+                      ...current,
+                      [key]: update(current[key] || []),
+                    }))
+                  }
                   onSubmit={submit}
                   onCancel={() => {
                     if (view)

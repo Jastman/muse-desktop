@@ -42,6 +42,7 @@ export class MuseHost {
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private refreshing = new Set<string>()
   private closing = false
+  private epoch = 0
 
   constructor(private emit: (event: AppEvent) => void) {}
 
@@ -54,6 +55,7 @@ export class MuseHost {
   }
 
   private async start(cliPath: string): Promise<ConnectionStatus> {
+    this.epoch++
     await this.close()
     this.closing = false
     this.setStatus({ state: 'connecting' })
@@ -135,8 +137,8 @@ export class MuseHost {
   }
 
   private setStatus(status: ConnectionStatus) {
-    this.status = status
-    this.emit({ type: 'connection', status })
+    this.status = { ...status, epoch: this.epoch }
+    this.emit({ type: 'connection', status: this.status })
   }
 
   private get connection() {
@@ -175,16 +177,22 @@ export class MuseHost {
     return this.view(live)
   }
 
-  async open(sessionId: string): Promise<SessionView> {
+  async open(sessionId: string, refresh = false): Promise<SessionView> {
     const existing = this.sessions.get(sessionId)
-    if (existing?.loaded) return this.view(existing)
+    if (existing?.loaded && !refresh) return this.view(existing)
+    const epoch = this.epoch
     if (existing) await this.unsubscribe(sessionId)
     const result = sessionResultSchema.parse(
       await this.connection.request('session/read', { sessionId, excludeItems: false }),
     )
-    const live = await this.hydrate(result, false)
+    if (epoch !== this.epoch)
+      throw new Error('The Muse connection changed. Open the conversation again.')
+    const loaded = existing?.loaded ?? false
+    const live = await this.hydrate(result, loaded)
+    if (loaded) await this.refreshPending(sessionId)
     try {
       await this.connection.request('view/subscribe', { sessionId, after: result.viewCursor })
+      if (!loaded) await this.refreshPending(sessionId)
     } catch (error) {
       // CLI 1.4.7 can read durable history without loading, but requires a loaded
       // session for live subscriptions. Do not claim another process's session just to view it.

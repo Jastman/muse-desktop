@@ -178,6 +178,7 @@ export type ConnectionStatus = {
   version?: string
   message?: string
   fingerprintWarning?: string
+  epoch?: number
 }
 export type UpdateStatus = {
   available: boolean
@@ -188,6 +189,13 @@ export type UpdateStatus = {
 export type GitChange = { path: string; status: string; staged: boolean }
 export type GitStatus = { branch: string; changes: GitChange[]; isRepository: boolean }
 export type Attachment = { id: string; name: string; kind: 'image' | 'text'; size: number }
+export const attachmentLimits = {
+  count: 5,
+  fileBytes: 2 * 1024 * 1024,
+  textBytes: 200 * 1024,
+  messageBytes: 4 * 1024 * 1024,
+} as const
+export type AttachmentInput = { name: string; data: Uint8Array }
 export type ProjectFile = { name: string; path: string; directory: boolean }
 export type AppEvent =
   | { type: 'connection'; status: ConnectionStatus }
@@ -222,11 +230,12 @@ export interface DesktopAPI {
   savePreferences(patch: Partial<Preferences>): Promise<Preferences>
   listSessions(cursor?: string): Promise<{ sessions: MuseSession[]; nextCursor: string | null }>
   createSession(project: string, modelId?: string): Promise<SessionView>
-  openSession(sessionId: string): Promise<SessionView>
+  openSession(sessionId: string, refresh?: boolean): Promise<SessionView>
   send(input: {
     sessionId: string
     text: string
     attachments: string[]
+    attachmentScope: string
     effort: ReasoningEffort
     mode: 'queue' | 'steer'
   }): Promise<void>
@@ -238,7 +247,8 @@ export interface DesktopAPI {
   approve(sessionId: string, approvalId: string, choiceId: string): Promise<void>
   answer(sessionId: string, userInputId: string, answers: QuestionAnswer[]): Promise<void>
   cancelQuestion(sessionId: string, userInputId: string): Promise<void>
-  chooseAttachments(): Promise<Attachment[]>
+  chooseAttachments(scope: string): Promise<Attachment[]>
+  stageAttachments(scope: string, files: AttachmentInput[]): Promise<Attachment[]>
   removeAttachment(id: string): Promise<void>
   requestMicrophone(): Promise<void>
   transcribeVoice(audio: Uint8Array): Promise<string>
